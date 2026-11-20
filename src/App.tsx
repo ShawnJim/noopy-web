@@ -511,6 +511,8 @@ export function App() {
         )}
         {nav === "assistant" && (
           <AssistantPage
+            client={client}
+            isDemo={IS_DEMO_MODE}
             spending={spending}
             balances={balances}
             aliases={aliases}
@@ -519,6 +521,7 @@ export function App() {
               setSelectedId(id);
               setNav("ledger");
             }}
+            onGoModels={() => setNav("models")}
           />
         )}
         {nav === "inbox" && (

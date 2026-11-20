@@ -357,4 +357,111 @@ export class NoopyClient {
       },
     );
   }
+
+  // --- v1 Chat Sessions & SSE Streaming (backed by Agent runtime + v2 Ontology tools) ---
+  listSessions() {
+    return this.request<{ items: ChatSessionRecord[] }>("/v1/sessions?channel=chat");
+  }
+
+  createSession(title?: string) {
+    return this.request<ChatSessionRecord>("/v1/sessions", {
+      method: "POST",
+      body: JSON.stringify(title ? { title } : {}),
+    });
+  }
+
+  getSessionMessages(sessionId: string) {
+    return this.request<{ items: ChatStoredMessage[] }>(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/messages`,
+    );
+  }
+
+  closeSession(sessionId: string) {
+    return this.request<ChatSessionRecord>(
+      `/v1/sessions/${encodeURIComponent(sessionId)}:close`,
+      { method: "POST" },
+    );
+  }
+
+  async streamSessionMessage(
+    sessionId: string,
+    content: string,
+    onEvent: (event: string, data: Record<string, unknown>) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    };
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    const res = await fetch(
+      `${this.baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/messages`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ content }),
+        signal,
+      },
+    );
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    }
+    if (!res.body) {
+      throw new Error("服务端未返回可读流（Empty SSE body）");
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    const flushFrame = (rawFrame: string) => {
+      const lines = rawFrame.split(/\r?\n/);
+      let eventName = "message";
+      const dataLines: string[] = [];
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trim());
+        }
+      }
+      if (dataLines.length === 0) return;
+      const joined = dataLines.join("\n");
+      try {
+        onEvent(eventName, JSON.parse(joined) as Record<string, unknown>);
+      } catch {
+        onEvent(eventName, { text: joined });
+      }
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx = buffer.indexOf("\n\n");
+      while (idx !== -1) {
+        const frame = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        if (frame.trim()) flushFrame(frame);
+        idx = buffer.indexOf("\n\n");
+      }
+    }
+    if (buffer.trim()) flushFrame(buffer);
+  }
 }
+
+export interface ChatSessionRecord {
+  id: string;
+  title?: string | null;
+  status: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ChatStoredMessage {
+  id: string;
+  role: "user" | "assistant" | "tool" | "system_note";
+  content: Record<string, unknown>;
+  created_at?: string;
+}
+
