@@ -6,41 +6,6 @@ import type {
   SpendingSummary,
 } from "../api/client";
 
-const DEMO_MONTHLY: MonthlyReportPoint[] = [
-  { month: "2025-11", personal: "4820.40", household: "310.00", income: "18500.00", count: 162 },
-  { month: "2025-12", personal: "6190.80", household: "520.00", income: "18500.00", count: 198 },
-  { month: "2026-01", personal: "7450.20", household: "890.50", income: "24200.00", count: 215 },
-  { month: "2026-02", personal: "5320.10", household: "640.00", income: "18500.00", count: 149 },
-  { month: "2026-03", personal: "4980.65", household: "415.20", income: "18500.00", count: 176 },
-  { month: "2026-04", personal: "5610.30", household: "480.00", income: "18900.00", count: 184 },
-  { month: "2026-05", personal: "6240.90", household: "560.40", income: "18500.00", count: 203 },
-  { month: "2026-06", personal: "5890.00", household: "712.80", income: "19100.00", count: 194 },
-  { month: "2026-07", personal: "6430.55", household: "635.00", income: "18500.00", count: 221 },
-  { month: "2026-08", personal: "5740.20", household: "490.00", income: "18500.00", count: 189 },
-  { month: "2026-09", personal: "5180.45", household: "530.60", income: "18500.00", count: 177 },
-  { month: "2026-10", personal: "6085.12", household: "618.90", income: "19800.00", count: 212 },
-];
-
-const DEMO_MERCHANTS: MerchantRankItem[] = [
-  { name: "山东高速信联科技股份有限公司 (ETC)", amount: "2946.80", count: 99 },
-  { name: "万物云（万科物业母公司）", amount: "2680.00", count: 95 },
-  { name: "特来电新能源", amount: "2180.50", count: 23 },
-  { name: "美团 / 北京三快在线", amount: "1960.40", count: 48 },
-  { name: "滴滴出行", amount: "1420.30", count: 19 },
-  { name: "湖南联通", amount: "1080.00", count: 54 },
-  { name: "iCloud 由云上贵州运营", amount: "816.00", count: 12 },
-  { name: "24H便利购 (武汉小麦便利)", amount: "642.50", count: 93 },
-];
-
-const DEMO_ACCOUNTS: AccountFlowItem[] = [
-  { account_id: "acct:card_2667", name: "中国银行储蓄卡(2667)", outflow: "38420.50", inflow: "142000.00", verified: 967, inferred: 0 },
-  { account_id: "acct:card_8300", name: "宁波银行储蓄卡(8300)", outflow: "19240.80", inflow: "46500.00", verified: 494, inferred: 0 },
-  { account_id: "acct:card_4755", name: "招商银行储蓄卡(4755)", outflow: "14810.20", inflow: "32000.00", verified: 325, inferred: 0 },
-  { account_id: "acct:wechat_wallet", name: "微信零钱", outflow: "11250.40", inflow: "9840.00", verified: 757, inferred: 0 },
-  { account_id: "acct:card_6333", name: "工商银行储蓄卡(6333)", outflow: "6840.30", inflow: "0.00", verified: 0, inferred: 151 },
-  { account_id: "acct:card_7662", name: "上海银行信用卡(7662)", outflow: "4120.00", inflow: "0.00", verified: 0, inferred: 80 },
-];
-
 const fmt = (v: string | number) => (Number.isFinite(Number(v)) ? Number(v).toFixed(2) : String(v));
 
 export function ReportsPage(props: {
@@ -49,11 +14,12 @@ export function ReportsPage(props: {
   monthly?: MonthlyReportPoint[];
   merchants?: MerchantRankItem[];
   accountFlows?: AccountFlowItem[];
+  onGoImport?: () => void;
 }) {
-  const { scope, spending } = props;
-  const monthly = props.monthly && props.monthly.length > 0 ? props.monthly : DEMO_MONTHLY;
-  const merchants = props.merchants && props.merchants.length > 0 ? props.merchants : DEMO_MERCHANTS;
-  const flows = props.accountFlows && props.accountFlows.length > 0 ? props.accountFlows : DEMO_ACCOUNTS;
+  const { scope, spending, onGoImport } = props;
+  const monthly = props.monthly ?? [];
+  const merchants = props.merchants ?? [];
+  const flows = props.accountFlows ?? [];
 
   const seriesVal = (m: MonthlyReportPoint) =>
     scope === "personal"
@@ -87,7 +53,9 @@ export function ReportsPage(props: {
           <div className="metric-label">统计覆盖月份</div>
           <div className="metric-value">{monthly.length} 个月</div>
           <div className="metric-sub">
-            {monthly[0]?.month} ~ {monthly[monthly.length - 1]?.month}
+            {monthly.length > 0
+              ? `${monthly[0]?.month} ~ ${monthly[monthly.length - 1]?.month}`
+              : "暂无账单数据"}
           </div>
         </div>
       </section>
@@ -101,17 +69,27 @@ export function ReportsPage(props: {
           <span className="tag tag-neutral mono">v_net_spending</span>
         </div>
         <div className="surface-body">
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: `repeat(${monthly.length}, minmax(42px, 1fr))`,
-              gap: 8,
-              alignItems: "end",
-              height: 190,
-              paddingTop: 18,
-              overflowX: "auto",
-            }}
-          >
+          {monthly.length === 0 ? (
+            <div style={{ padding: "28px 12px", textAlign: "center", color: "var(--ink-muted)" }}>
+              <div>暂无月度统计数据，请先导入支付宝 / 微信 / 银行账单并运行求解器。</div>
+              {onGoImport && (
+                <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={onGoImport}>
+                  前往导入账单
+                </button>
+              )}
+            </div>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: `repeat(${monthly.length}, minmax(42px, 1fr))`,
+                gap: 8,
+                alignItems: "end",
+                height: 190,
+                paddingTop: 18,
+                overflowX: "auto",
+              }}
+            >
             {monthly.map((m, idx) => {
               const p = Number(m.personal);
               const h = Number(m.household);
@@ -161,7 +139,8 @@ export function ReportsPage(props: {
                 </div>
               );
             })}
-          </div>
+            </div>
+          )}
         </div>
       </section>
 
@@ -171,27 +150,31 @@ export function ReportsPage(props: {
             <h2 className="surface-title">Top 商户 / 主体消费排行（已跨源归一）</h2>
           </div>
           <div className="surface-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {merchants.slice(0, 10).map((m) => {
-              const w = Math.max(2, Math.round((Number(m.amount) / maxMerch) * 100));
-              return (
-                <div key={m.name}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
-                    <span style={{ fontWeight: 500 }}>
-                      {m.name}{" "}
-                      <span className="mono" style={{ color: "var(--ink-muted)", fontSize: 11 }}>
-                        ({m.count}笔)
+            {merchants.length === 0 ? (
+              <div style={{ color: "var(--ink-muted)", fontSize: 13 }}>暂无商户消费统计。</div>
+            ) : (
+              merchants.slice(0, 10).map((m) => {
+                const w = Math.max(2, Math.round((Number(m.amount) / maxMerch) * 100));
+                return (
+                  <div key={m.name}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
+                      <span style={{ fontWeight: 500 }}>
+                        {m.name}{" "}
+                        <span className="mono" style={{ color: "var(--ink-muted)", fontSize: 11 }}>
+                          ({m.count}笔)
+                        </span>
                       </span>
-                    </span>
-                    <span className="mono" style={{ fontWeight: 600 }}>
-                      ¥{fmt(m.amount)}
-                    </span>
+                      <span className="mono" style={{ fontWeight: 600 }}>
+                        ¥{fmt(m.amount)}
+                      </span>
+                    </div>
+                    <div className="progress-track">
+                      <div className="progress-fill" style={{ width: `${w}%` }} />
+                    </div>
                   </div>
-                  <div className="progress-track">
-                    <div className="progress-fill" style={{ width: `${w}%` }} />
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </section>
 
@@ -210,20 +193,28 @@ export function ReportsPage(props: {
                 </tr>
               </thead>
               <tbody>
-                {flows.map((a) => (
-                  <tr key={a.account_id}>
-                    <td style={{ fontWeight: 500 }}>{a.name}</td>
-                    <td className="num-col">¥{fmt(a.outflow)}</td>
-                    <td className="num-col">¥{fmt(a.inflow)}</td>
-                    <td>
-                      {a.inferred > 0 ? (
-                        <span className="tag tag-inferred">{a.inferred} inferred</span>
-                      ) : (
-                        <span className="tag tag-verified">{a.verified} verified</span>
-                      )}
+                {flows.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} style={{ color: "var(--ink-muted)", textAlign: "center", padding: 20 }}>
+                      暂无资金账户流水数据。
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  flows.map((a) => (
+                    <tr key={a.account_id}>
+                      <td style={{ fontWeight: 500 }}>{a.name}</td>
+                      <td className="num-col">¥{fmt(a.outflow)}</td>
+                      <td className="num-col">¥{fmt(a.inflow)}</td>
+                      <td>
+                        {a.inferred > 0 ? (
+                          <span className="tag tag-inferred">{a.inferred} inferred</span>
+                        ) : (
+                          <span className="tag tag-verified">{a.verified} verified</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

@@ -1,84 +1,109 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AccountBalance, SourceFileRecord } from "../api/client";
-
-const DEMO_FILES: SourceFileRecord[] = [
-  { id: "f1", filename: "中国银行/最近1年流水-密码******.pdf", parser_id: "boc-pdf", parse_status: "parsed", record_count: 967, range: "2025-11-03 ~ 2026-11-01" },
-  { id: "f2", filename: "宁波银行/宁波银行1102.pdf", parser_id: "nbcb-pdf", parse_status: "parsed", record_count: 494, range: "2026-05-11 ~ 2026-11-02" },
-  { id: "f3", filename: "招商银行/招商银行交易流水(20261102).pdf", parser_id: "cmb-pdf", parse_status: "parsed", record_count: 309, range: "2025-10-31 ~ 2026-10-23" },
-  { id: "f4", filename: "招商银行信用卡/2025.11-2026.10 月度账单 (10份)", parser_id: "cmb-credit-pdf", parse_status: "parsed", record_count: 40, range: "2025-11-13 ~ 2026-10-15" },
-  { id: "f5", filename: "wechat/微信支付账单流水文件(20251102-20261102).xlsx", parser_id: "wechat-bill", parse_status: "parsed", record_count: 1652, range: "2025-11-02 ~ 2026-11-02" },
-  { id: "f6", filename: "alipay/支付宝交易明细(20251103-20261102).csv", parser_id: "alipay-csv", parse_status: "parsed", record_count: 1562, range: "2025-11-03 ~ 2026-11-02" },
-  { id: "f7", filename: "工商银行/2026年度储蓄卡加密账单.pdf", parser_id: "icbc-pdf", parse_status: "needs_password", record_count: 0, error: "PDF 已加密，请输入账单解压密码以解锁并升级 151 笔 inferred 资金腿" },
-];
 
 export function ImportPage(props: {
   accounts: AccountBalance[];
   files?: SourceFileRecord[];
-  onUploadFile?: (file: File, accountId?: string) => Promise<void>;
+  isDemo?: boolean;
+  onUploadFile?: (file: File, accountId?: string) => Promise<SourceFileRecord | void>;
+  onUnlockFile?: (fileId: string, password: string) => Promise<SourceFileRecord | void>;
   onRunSolver: () => Promise<string>;
 }) {
-  const { accounts, onUploadFile, onRunSolver } = props;
-  const [files, setFiles] = useState<SourceFileRecord[]>(props.files ?? DEMO_FILES);
+  const { accounts, isDemo = false, onUploadFile, onUnlockFile, onRunSolver } = props;
+  const [files, setFiles] = useState<SourceFileRecord[]>(props.files ?? []);
   const [accountId, setAccountId] = useState<string>("");
   const [dragOver, setDragOver] = useState(false);
   const [pwdMap, setPwdMap] = useState<Record<string, string>>({});
   const [solverLog, setSolverLog] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  useEffect(() => {
+    setFiles(props.files ?? []);
+  }, [props.files]);
+
   const handleFiles = async (list: FileList | null) => {
     if (!list || list.length === 0) return;
+    setErrorMsg(null);
     for (const file of Array.from(list)) {
-      const lower = file.name.toLowerCase();
-      const guessedParser = lower.includes("wechat") || lower.endsWith(".xlsx")
-        ? "wechat-bill"
-        : lower.includes("alipay") || lower.endsWith(".csv")
-          ? "alipay-csv"
-          : lower.includes("信用卡")
-            ? "cmb-credit-pdf"
-            : "bank-pdf";
-      const rec: SourceFileRecord = {
-        id: `up_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        filename: file.name,
-        parser_id: guessedParser,
-        parse_status: "parsed",
-        record_count: Math.max(12, Math.round(file.size / 380)),
-        range: "刚刚上传",
-      };
-      setFiles((prev) => [rec, ...prev]);
-      if (onUploadFile) {
-        try {
-          await onUploadFile(file, accountId || undefined);
-        } catch {
-          /* offline demo fallback keeps local entry */
+      if (isDemo) {
+        const lower = file.name.toLowerCase();
+        const guessedParser =
+          lower.includes("wechat") || lower.endsWith(".xlsx")
+            ? "wechat-bill"
+            : lower.includes("alipay") || lower.endsWith(".csv")
+              ? "alipay-csv"
+              : lower.includes("信用卡")
+                ? "cmb-credit-pdf"
+                : "bank-pdf";
+        setFiles((prev) => [
+          {
+            id: `demo_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            filename: file.name,
+            parser_id: guessedParser,
+            parse_status: "parsed",
+            record_count: Math.max(12, Math.round(file.size / 380)),
+            range: "Demo Sandbox",
+          },
+          ...prev,
+        ]);
+        continue;
+      }
+      if (!onUploadFile) {
+        setErrorMsg("未配置后端上传处理函数。");
+        return;
+      }
+      try {
+        const uploaded = await onUploadFile(file, accountId || undefined);
+        if (uploaded) {
+          setFiles((prev) => [uploaded, ...prev]);
         }
+      } catch (err) {
+        setErrorMsg(`上传 ${file.name} 失败：${err instanceof Error ? err.message : String(err)}`);
       }
     }
   };
 
-  const unlock = (id: string) => {
+  const unlock = async (id: string) => {
     const pwd = (pwdMap[id] ?? "").trim();
     if (!pwd) return;
-    setFiles((prev) =>
-      prev.map((f) =>
-        f.id === id
-          ? {
-              ...f,
-              parse_status: "parsed",
-              record_count: 151,
-              range: "2025-11-01 ~ 2026-11-01（密码解锁成功）",
-              error: null,
-            }
-          : f,
-      ),
-    );
+    setErrorMsg(null);
+    if (isDemo) {
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === id
+            ? {
+                ...f,
+                parse_status: "parsed",
+                record_count: 151,
+                range: "2025-11-01 ~ 2026-11-01（Demo 密码解锁）",
+                error: null,
+              }
+            : f,
+        ),
+      );
+      return;
+    }
+    if (!onUnlockFile) return;
+    try {
+      const updated = await onUnlockFile(id, pwd);
+      if (updated) {
+        setFiles((prev) => prev.map((f) => (f.id === id ? updated : f)));
+      }
+    } catch (err) {
+      setErrorMsg(`解锁失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const triggerSolve = async () => {
     setRunning(true);
+    setErrorMsg(null);
     try {
       const res = await onRunSolver();
       setSolverLog(res);
+    } catch (err) {
+      setErrorMsg(`求解失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setRunning(false);
     }
@@ -159,6 +184,20 @@ export function ImportPage(props: {
                 {running ? "正在求解..." : "运行全局归因求解 (/v2/solver/run)"}
               </button>
             </div>
+            {errorMsg && (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: "8px 12px",
+                  borderRadius: "var(--radius-sm)",
+                  background: "var(--sem-warn-soft, #fdf2f2)",
+                  color: "var(--sem-warn, #a33)",
+                  fontSize: 12.5,
+                }}
+              >
+                {errorMsg}
+              </div>
+            )}
             {solverLog && <pre className="code-block">{solverLog}</pre>}
           </div>
         </section>

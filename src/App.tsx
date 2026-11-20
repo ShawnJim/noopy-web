@@ -1,22 +1,21 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   NoopyClient,
   type AccountBalance,
+  type AccountFlowItem,
   type AttributionLineageTree,
   type EconomicEvent,
   type IdentityAlias,
+  type MerchantRankItem,
+  type MonthlyReportPoint,
   type ReviewItem,
+  type SourceFileRecord,
   type SpendingScope,
   type SpendingSummary,
+  type SubscriptionCandidate,
+  type SubscriptionItem,
 } from "./api/client";
-import {
-  computeDemoSpending,
-  DEMO_ALIASES,
-  DEMO_BALANCES,
-  DEMO_EVENTS,
-  DEMO_LINEAGES,
-  DEMO_REVIEWS,
-} from "./data/demoOntology";
+import { API_BASE_URL, IS_DEMO_MODE } from "./config";
 import { COPY, t, type Lang } from "./i18n";
 import { AgentModelSettingsPage } from "./pages/AgentModelSettingsPage";
 import { AssistantPage } from "./pages/AssistantPage";
@@ -81,7 +80,89 @@ const HERO_COPY: Record<NavKey, { eyebrow: string; zh: string; en: string }> = {
   },
 };
 
-const client = new NoopyClient();
+function emptySpending(scope: SpendingScope): SpendingSummary {
+  return {
+    scope,
+    net_spending: "0.00",
+    personal_spending: "0.00",
+    household_spending: "0.00",
+    total_spending: "0.00",
+    active_event_count: 0,
+    family_event_count: 0,
+    inferred_leg_count: 0,
+    verified_leg_count: 0,
+  };
+}
+
+function aggregateLiveReports(
+  events: EconomicEvent[],
+  balances: AccountBalance[],
+): {
+  monthly: MonthlyReportPoint[];
+  merchants: MerchantRankItem[];
+  accountFlows: AccountFlowItem[];
+} {
+  const monthMap = new Map<string, { personal: number; household: number; income: number; count: number }>();
+  const merchMap = new Map<string, { amount: number; count: number }>();
+
+  for (const ev of events) {
+    const month = ev.occurred_at.slice(0, 7);
+    const amt = Math.abs(Number(ev.amount) || 0);
+    const m = monthMap.get(month) ?? { personal: 0, household: 0, income: 0, count: 0 };
+    m.count += 1;
+    const isHousehold =
+      ev.kind === "family_card_spend" ||
+      (Boolean(ev.beneficiary_party_id) && ev.beneficiary_party_id !== "party:self");
+    if (ev.kind === "income") {
+      m.income += amt;
+    } else if (isHousehold) {
+      m.household += amt;
+    } else if (ev.kind === "expense" || ev.kind === "purchase" || ev.kind === "fee") {
+      m.personal += amt;
+    }
+    monthMap.set(month, m);
+
+    if (ev.kind === "expense" || ev.kind === "purchase" || isHousehold) {
+      const key = ev.title || "未命名商户";
+      const cur = merchMap.get(key) ?? { amount: 0, count: 0 };
+      cur.amount += amt;
+      cur.count += 1;
+      merchMap.set(key, cur);
+    }
+  }
+
+  const monthly: MonthlyReportPoint[] = Array.from(monthMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, v]) => ({
+      month,
+      personal: v.personal.toFixed(2),
+      household: v.household.toFixed(2),
+      income: v.income.toFixed(2),
+      count: v.count,
+    }));
+
+  const merchants: MerchantRankItem[] = Array.from(merchMap.entries())
+    .sort(([, a], [, b]) => b.amount - a.amount)
+    .slice(0, 12)
+    .map(([name, v]) => ({ name, amount: v.amount.toFixed(2), count: v.count }));
+
+  const accountFlows: AccountFlowItem[] = balances.map((b) => {
+    const total = Number(b.total_balance) || 0;
+    const hasVerified = Number(b.verified_balance) !== 0;
+    return {
+      account_id: b.account_id,
+      name: b.account_id,
+      outflow: total < 0 ? Math.abs(total).toFixed(2) : "0.00",
+      inflow: total > 0 ? total.toFixed(2) : "0.00",
+      verified: hasVerified ? 1 : 0,
+      inferred: b.inferred_leg_count,
+    };
+  });
+
+  return { monthly, merchants, accountFlows };
+}
+
+const client = new NoopyClient(API_BASE_URL);
 
 export function App() {
   const [nav, setNav] = useState<NavKey>("reports");
@@ -89,77 +170,132 @@ export function App() {
   const [scope, setScope] = useState<SpendingScope>("all");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [search, setSearch] = useState("");
-  const [mode, setMode] = useState<"live" | "demo">("demo");
 
-  const [events, setEvents] = useState<EconomicEvent[]>(DEMO_EVENTS);
-  const [balances, setBalances] = useState<AccountBalance[]>(DEMO_BALANCES);
-  const [aliases, setAliases] = useState<IdentityAlias[]>(DEMO_ALIASES);
-  const [reviews, setReviews] = useState<ReviewItem[]>(DEMO_REVIEWS);
-  const [spending, setSpending] = useState<SpendingSummary>(() => computeDemoSpending("all"));
-  const [selectedId, setSelectedId] = useState<string | null>(DEMO_EVENTS[0]?.id ?? null);
-  const [lineage, setLineage] = useState<AttributionLineageTree | null>(
-    DEMO_LINEAGES[DEMO_EVENTS[0]?.id ?? ""] ?? null,
+  const [events, setEvents] = useState<EconomicEvent[]>([]);
+  const [balances, setBalances] = useState<AccountBalance[]>([]);
+  const [aliases, setAliases] = useState<IdentityAlias[]>([]);
+  const [reviews, setReviews] = useState<ReviewItem[]>([]);
+  const [spending, setSpending] = useState<SpendingSummary>(() => emptySpending("all"));
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [lineage, setLineage] = useState<AttributionLineageTree | null>(null);
+
+  const [files, setFiles] = useState<SourceFileRecord[]>([]);
+  const [subs, setSubs] = useState<SubscriptionItem[]>([]);
+  const [subCandidates, setSubCandidates] = useState<SubscriptionCandidate[]>([]);
+
+  // Demo-only optional overrides (only populated when VITE_DEMO_MODE === "true")
+  const [demoMonthly, setDemoMonthly] = useState<MonthlyReportPoint[] | undefined>(undefined);
+  const [demoMerchants, setDemoMerchants] = useState<MerchantRankItem[] | undefined>(undefined);
+  const [demoFlows, setDemoFlows] = useState<AccountFlowItem[] | undefined>(undefined);
+  const demoLineagesRef = useRef<Record<string, AttributionLineageTree>>({});
+
+  // Live backend connection & auth state
+  const [connStatus, setConnStatus] = useState<"loading" | "connected" | "error">(
+    IS_DEMO_MODE ? "connected" : "loading",
+  );
+  const [connError, setConnError] = useState<string | null>(null);
+  const [loginEmail, setLoginEmail] = useState("owner@noopy.local");
+  const [loginPassword, setLoginPassword] = useState("noopy-dev-password");
+  const [loggingIn, setLoggingIn] = useState(false);
+
+  const loadLive = useCallback(
+    async (activeScope: SpendingScope, forceRelogin = false) => {
+      setConnStatus("loading");
+      setConnError(null);
+      try {
+        if (forceRelogin) {
+          window.localStorage.removeItem("noopy_v2_token");
+        }
+        const cached = window.localStorage.getItem("noopy_v2_token");
+        if (cached) {
+          client.setToken(cached);
+        } else {
+          const tok = await client.login(loginEmail, loginPassword);
+          window.localStorage.setItem("noopy_v2_token", tok);
+        }
+
+        const [sp, bal, evs, rev, als] = await Promise.all([
+          client.getSpendingSummary(activeScope),
+          client.getBalances(),
+          client.queryObjects<EconomicEvent>({
+            object_type: "economic_event",
+            scope: activeScope,
+            limit: 500,
+          }),
+          client.getReviewInbox(),
+          client.queryObjects<IdentityAlias>({ object_type: "identity_alias", limit: 300 }),
+        ]);
+
+        // Optional v1 endpoints (best-effort; empty array if not yet populated)
+        const [fileRes, subRes, candRes] = await Promise.allSettled([
+          client.listFiles(),
+          client.getSubscriptions(),
+          client.detectSubscriptions(),
+        ]);
+
+        setSpending(sp);
+        setBalances(bal.items);
+        setEvents(evs.items);
+        setReviews(rev.items);
+        setAliases(als.items);
+        if (fileRes.status === "fulfilled") setFiles(fileRes.value.items);
+        if (subRes.status === "fulfilled") setSubs(subRes.value.items);
+        if (candRes.status === "fulfilled") setSubCandidates(candRes.value.items);
+
+        setSelectedId((prev) =>
+          evs.items.length === 0
+            ? null
+            : prev && evs.items.some((e) => e.id === prev)
+              ? prev
+              : evs.items[0].id,
+        );
+        setConnStatus("connected");
+      } catch (err) {
+        if (!forceRelogin && window.localStorage.getItem("noopy_v2_token")) {
+          return loadLive(activeScope, true);
+        }
+        setConnStatus("error");
+        setConnError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [loginEmail, loginPassword],
   );
 
-  const loadAll = async (activeScope: SpendingScope) => {
-    const cached = window.localStorage.getItem("noopy_v2_token");
-    if (cached) {
-      client.setToken(cached);
-    } else {
-      const tok = await client.login("owner@noopy.local", "noopy-dev-password");
-      window.localStorage.setItem("noopy_v2_token", tok);
+  useEffect(() => {
+    if (IS_DEMO_MODE) {
+      let active = true;
+      import("./data/demoOntology").then((mod) => {
+        if (!active) return;
+        demoLineagesRef.current = mod.DEMO_LINEAGES;
+        setSpending(mod.computeDemoSpending(scope));
+        setBalances(mod.DEMO_BALANCES);
+        setEvents(mod.DEMO_EVENTS);
+        setReviews(mod.DEMO_REVIEWS);
+        setAliases(mod.DEMO_ALIASES);
+        setDemoMonthly(mod.DEMO_MONTHLY);
+        setDemoMerchants(mod.DEMO_MERCHANTS);
+        setDemoFlows(mod.DEMO_ACCOUNTS);
+        setFiles(mod.DEMO_FILES);
+        setSubs(mod.DEMO_SUBS);
+        setSubCandidates(mod.DEMO_SUB_CANDIDATES);
+        setSelectedId((prev) => prev ?? mod.DEMO_EVENTS[0]?.id ?? null);
+        setConnStatus("connected");
+      });
+      return () => {
+        active = false;
+      };
     }
-    const [sp, bal, evs, rev, als] = await Promise.all([
-      client.getSpendingSummary(activeScope),
-      client.getBalances(),
-      client.queryObjects<EconomicEvent>({
-        object_type: "economic_event",
-        scope: activeScope,
-        limit: 200,
-      }),
-      client.getReviewInbox(),
-      client.queryObjects<IdentityAlias>({ object_type: "identity_alias", limit: 300 }),
-    ]);
-    setMode("live");
-    setSpending(sp);
-    setBalances(bal.items);
-    setEvents(evs.items);
-    setReviews(rev.items);
-    setAliases(als.items);
-    if (evs.items.length > 0 && !evs.items.some((e) => e.id === selectedId)) {
-      setSelectedId(evs.items[0].id);
-    }
-  };
+
+    void loadLive(scope);
+  }, [scope, loadLive]);
 
   useEffect(() => {
-    let mounted = true;
-    loadAll(scope).catch(async () => {
-      if (window.localStorage.getItem("noopy_v2_token")) {
-        window.localStorage.removeItem("noopy_v2_token");
-        try {
-          await loadAll(scope);
-          return;
-        } catch {
-          /* fall through to demo */
-        }
-      }
-      if (!mounted) return;
-      setMode("demo");
-      setSpending(computeDemoSpending(scope));
-      setBalances(DEMO_BALANCES);
-      setEvents(DEMO_EVENTS);
-      setReviews(DEMO_REVIEWS);
-      setAliases(DEMO_ALIASES);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, [scope]);
-
-  useEffect(() => {
-    if (!selectedId) return;
-    if (mode === "demo") {
-      setLineage(DEMO_LINEAGES[selectedId] ?? null);
+    if (!selectedId) {
+      setLineage(null);
+      return;
+    }
+    if (IS_DEMO_MODE) {
+      setLineage(demoLineagesRef.current[selectedId] ?? null);
       return;
     }
     let active = true;
@@ -174,14 +310,29 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [selectedId, mode]);
+  }, [selectedId]);
+
+  const liveReports = useMemo(
+    () => (IS_DEMO_MODE ? null : aggregateLiveReports(events, balances)),
+    [events, balances],
+  );
+
+  const handleManualLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoggingIn(true);
+    try {
+      await loadLive(scope, true);
+    } finally {
+      setLoggingIn(false);
+    }
+  };
 
   const handleRunSolver = async () => {
-    if (mode === "demo") {
-      return "Demo Mode · Connect local noopy-core (/v2/solver/run) to execute 5-stage Rust solver & PostgreSQL persistence.";
+    if (IS_DEMO_MODE) {
+      return "Demo Sandbox · Switch VITE_DEMO_MODE=false and connect noopy-core (/v2/solver/run) to execute the live 5-stage Rust solver.";
     }
     const res = await client.runSolver([]);
-    await loadAll(scope);
+    await loadLive(scope);
     return JSON.stringify(res, null, 2);
   };
 
@@ -196,7 +347,9 @@ export function App() {
         <div className="glass-dock">
           <div className="dock-brand">
             <span className="dock-logo">Noopy</span>
-            <span className="dock-edition">Atelier Paper · v2</span>
+            <span className="dock-edition">
+              Atelier Paper · {IS_DEMO_MODE ? "Demo Sandbox" : "v2"}
+            </span>
           </div>
 
           <nav className="dock-nav" aria-label="Primary Navigation">
@@ -245,10 +398,61 @@ export function App() {
       </header>
 
       <main key={`${nav}-${lang}`} className="editorial-stage">
+        {!IS_DEMO_MODE && connStatus === "error" && (
+          <section
+            className="surface"
+            style={{
+              marginBottom: 16,
+              borderColor: "var(--sem-warn, #c44)",
+            }}
+          >
+            <div className="surface-header">
+              <h2 className="surface-title">未连接到 Noopy Core 后端（正式模式已禁用假数据降级）</h2>
+              <span className="tag tag-inferred mono">OFFLINE</span>
+            </div>
+            <div className="surface-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ fontSize: 13, color: "var(--ink-secondary)" }}>
+                错误信息：<code className="mono">{connError}</code>
+              </div>
+              <form
+                onSubmit={handleManualLogin}
+                style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}
+              >
+                <input
+                  className="input"
+                  style={{ width: 200 }}
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  placeholder="账号邮箱"
+                />
+                <input
+                  className="input"
+                  style={{ width: 180 }}
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="密码"
+                />
+                <button className="btn btn-primary" type="submit" disabled={loggingIn}>
+                  {loggingIn ? "连接中..." : "登录并重新连接"}
+                </button>
+              </form>
+            </div>
+          </section>
+        )}
+
         <section className="editorial-hero">
           <div>
             <div className="hero-eyebrow">
-              {hero.eyebrow} · {mode === "live" ? "LIVE POSTGRESQL" : "STUDIO PREVIEW"} · 6/6 INVARIANTS PASS
+              {hero.eyebrow} ·{" "}
+              {IS_DEMO_MODE
+                ? "DEMO SANDBOX (VITE_DEMO_MODE=true)"
+                : connStatus === "connected"
+                  ? "LIVE POSTGRESQL"
+                  : connStatus === "loading"
+                    ? "CONNECTING..."
+                    : "DISCONNECTED"}{" "}
+              · 6/6 INVARIANTS PASS
             </div>
             <h1 className="hero-headline">{t({ zh: hero.zh, en: hero.en }, lang)}</h1>
           </div>
@@ -283,7 +487,16 @@ export function App() {
           </div>
         </section>
 
-        {nav === "reports" && <ReportsPage scope={scope} spending={spending} />}
+        {nav === "reports" && (
+          <ReportsPage
+            scope={scope}
+            spending={spending}
+            monthly={IS_DEMO_MODE ? demoMonthly : liveReports?.monthly}
+            merchants={IS_DEMO_MODE ? demoMerchants : liveReports?.merchants}
+            accountFlows={IS_DEMO_MODE ? demoFlows : liveReports?.accountFlows}
+            onGoImport={() => setNav("import")}
+          />
+        )}
         {nav === "ledger" && (
           <LedgerPage
             events={events}
@@ -317,13 +530,19 @@ export function App() {
         {nav === "import" && (
           <ImportPage
             accounts={balances}
-            onUploadFile={async (f, aid) => {
-              await client.uploadFile(f, aid);
-            }}
+            files={files}
+            isDemo={IS_DEMO_MODE}
+            onUploadFile={async (f, aid) => client.uploadFile(f, aid)}
+            onUnlockFile={async (fid, pwd) => client.unlockFilePassword(fid, pwd)}
             onRunSolver={handleRunSolver}
           />
         )}
-        {nav === "subscriptions" && <SubscriptionsPage />}
+        {nav === "subscriptions" && (
+          <SubscriptionsPage
+            initialSubscriptions={subs}
+            initialCandidates={subCandidates}
+          />
+        )}
         {nav === "ontology" && (
           <OntologyPage
             balances={balances}

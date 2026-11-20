@@ -4,13 +4,19 @@
  */
 import type {
   AccountBalance,
+  AccountFlowItem,
   AttributionLineageTree,
   EconomicEvent,
   IdentityAlias,
+  MerchantRankItem,
+  MonthlyReportPoint,
   ReviewItem,
+  SourceFileRecord,
   SpendingScope,
   SpendingSummary,
-} from "../api/ontology";
+  SubscriptionCandidate,
+  SubscriptionItem,
+} from "../api/client";
 
 export const DEMO_EVENTS: EconomicEvent[] = [
   {
@@ -350,3 +356,91 @@ export function computeDemoSpending(scope: SpendingScope): SpendingSummary {
     verified_leg_count: 1283,
   };
 }
+
+export const DEMO_MONTHLY: MonthlyReportPoint[] = [
+  { month: "2025-11", personal: "4820.40", household: "310.00", income: "18500.00", count: 162 },
+  { month: "2025-12", personal: "6190.80", household: "520.00", income: "18500.00", count: 198 },
+  { month: "2026-01", personal: "7450.20", household: "890.50", income: "24200.00", count: 215 },
+  { month: "2026-02", personal: "5320.10", household: "640.00", income: "18500.00", count: 149 },
+  { month: "2026-03", personal: "4980.65", household: "415.20", income: "18500.00", count: 176 },
+  { month: "2026-04", personal: "5610.30", household: "480.00", income: "18900.00", count: 184 },
+  { month: "2026-05", personal: "6240.90", household: "560.40", income: "18500.00", count: 203 },
+  { month: "2026-06", personal: "5890.00", household: "712.80", income: "19100.00", count: 194 },
+  { month: "2026-07", personal: "6430.55", household: "635.00", income: "18500.00", count: 221 },
+  { month: "2026-08", personal: "5740.20", household: "490.00", income: "18500.00", count: 189 },
+  { month: "2026-09", personal: "5180.45", household: "530.60", income: "18500.00", count: 177 },
+  { month: "2026-10", personal: "6085.12", household: "618.90", income: "19800.00", count: 212 },
+];
+
+export const DEMO_MERCHANTS: MerchantRankItem[] = [
+  { name: "山东高速信联科技股份有限公司 (ETC)", amount: "2946.80", count: 99 },
+  { name: "万物云（万科物业母公司）", amount: "2680.00", count: 95 },
+  { name: "特来电新能源", amount: "2180.50", count: 23 },
+  { name: "美团 / 北京三快在线", amount: "1960.40", count: 48 },
+  { name: "滴滴出行", amount: "1420.30", count: 19 },
+  { name: "湖南联通", amount: "1080.00", count: 54 },
+  { name: "iCloud 由云上贵州运营", amount: "816.00", count: 12 },
+  { name: "24H便利购 (武汉小麦便利)", amount: "642.50", count: 93 },
+];
+
+export const DEMO_ACCOUNTS: AccountFlowItem[] = [
+  { account_id: "acct:card_2667", name: "中国银行储蓄卡(2667)", outflow: "38420.50", inflow: "142000.00", verified: 967, inferred: 0 },
+  { account_id: "acct:card_8300", name: "宁波银行储蓄卡(8300)", outflow: "19240.80", inflow: "46500.00", verified: 494, inferred: 0 },
+  { account_id: "acct:card_4755", name: "招商银行储蓄卡(4755)", outflow: "14810.20", inflow: "32000.00", verified: 325, inferred: 0 },
+  { account_id: "acct:wechat_wallet", name: "微信零钱", outflow: "11250.40", inflow: "9840.00", verified: 757, inferred: 0 },
+  { account_id: "acct:card_6333", name: "工商银行储蓄卡(6333)", outflow: "6840.30", inflow: "0.00", verified: 0, inferred: 151 },
+  { account_id: "acct:card_7662", name: "上海银行信用卡(7662)", outflow: "4120.00", inflow: "0.00", verified: 0, inferred: 80 },
+];
+
+export const DEMO_FILES: SourceFileRecord[] = [
+  { id: "f1", filename: "中国银行/最近1年流水-密码******.pdf", parser_id: "boc-pdf", parse_status: "parsed", record_count: 967, range: "2025-11-03 ~ 2026-11-01" },
+  { id: "f2", filename: "宁波银行/宁波银行1102.pdf", parser_id: "nbcb-pdf", parse_status: "parsed", record_count: 494, range: "2026-05-11 ~ 2026-11-02" },
+  { id: "f3", filename: "招商银行/招商银行交易流水(20261102).pdf", parser_id: "cmb-pdf", parse_status: "parsed", record_count: 309, range: "2025-10-31 ~ 2026-10-23" },
+  { id: "f4", filename: "招商银行信用卡/2025.11-2026.10 月度账单 (10份)", parser_id: "cmb-credit-pdf", parse_status: "parsed", record_count: 40, range: "2025-11-13 ~ 2026-10-15" },
+  { id: "f5", filename: "wechat/微信支付账单流水文件(20251102-20261102).xlsx", parser_id: "wechat-bill", parse_status: "parsed", record_count: 1652, range: "2025-11-02 ~ 2026-11-02" },
+  { id: "f6", filename: "alipay/支付宝交易明细(20251103-20261102).csv", parser_id: "alipay-csv", parse_status: "parsed", record_count: 1562, range: "2025-11-03 ~ 2026-11-02" },
+  { id: "f7", filename: "工商银行/2026年度储蓄卡加密账单.pdf", parser_id: "icbc-pdf", parse_status: "needs_password", record_count: 0, error: "PDF 已加密，请输入账单解压密码以解锁并升级 151 笔 inferred 资金腿" },
+];
+
+export const DEMO_SUBS: SubscriptionItem[] = [
+  {
+    id: "sub_icloud",
+    name: "iCloud+ 200GB（云上贵州）",
+    merchant: "iCloud 由云上贵州运营",
+    amount: "68.00",
+    currency: "CNY",
+    cycle: "month",
+    next_charge_on: "2026-11-15",
+    status: "active",
+    flag: null,
+  },
+  {
+    id: "sub_unicom",
+    name: "湖南联通手机月租充值",
+    merchant: "湖南联通",
+    amount: "20.00",
+    currency: "CNY",
+    cycle: "month",
+    next_charge_on: "2026-11-28",
+    status: "active",
+    flag: null,
+  },
+  {
+    id: "sub_gcloud",
+    name: "Google Cloud / AI 服务",
+    merchant: "GOOGLE *CLOUD",
+    amount: "69.34",
+    currency: "CNY",
+    cycle: "month",
+    next_charge_on: "2026-12-10",
+    status: "active",
+    flag: "汇率浮动 ±1.20",
+  },
+];
+
+export const DEMO_SUB_CANDIDATES: SubscriptionCandidate[] = [
+  { title: "万物云（万科物业母公司）", amount: "10.00", months: 9, charges: 95, last_on: "2026-10-28" },
+  { title: "特来电新能源（固定定额充）", amount: "100.00", months: 5, charges: 23, last_on: "2026-08-22" },
+  { title: "山东高速信联科技 (ETC固定通勤段)", amount: "38.00", months: 5, charges: 77, last_on: "2026-10-30" },
+];
+

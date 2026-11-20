@@ -1,51 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   SubscriptionCandidate,
   SubscriptionCycle,
   SubscriptionItem,
 } from "../api/client";
-
-const INITIAL_SUBS: SubscriptionItem[] = [
-  {
-    id: "sub_icloud",
-    name: "iCloud+ 200GB（云上贵州）",
-    merchant: "iCloud 由云上贵州运营",
-    amount: "68.00",
-    currency: "CNY",
-    cycle: "month",
-    next_charge_on: "2026-11-15",
-    status: "active",
-    flag: null,
-  },
-  {
-    id: "sub_unicom",
-    name: "湖南联通手机月租充值",
-    merchant: "湖南联通",
-    amount: "20.00",
-    currency: "CNY",
-    cycle: "month",
-    next_charge_on: "2026-11-28",
-    status: "active",
-    flag: null,
-  },
-  {
-    id: "sub_gcloud",
-    name: "Google Cloud / AI 服务",
-    merchant: "GOOGLE *CLOUD",
-    amount: "69.34",
-    currency: "CNY",
-    cycle: "month",
-    next_charge_on: "2026-12-10",
-    status: "active",
-    flag: "汇率浮动 ±1.20",
-  },
-];
-
-const INITIAL_CANDIDATES: SubscriptionCandidate[] = [
-  { title: "万物云（万科物业母公司）", amount: "10.00", months: 9, charges: 95, last_on: "2026-10-28" },
-  { title: "特来电新能源（固定定额充）", amount: "100.00", months: 5, charges: 23, last_on: "2026-08-22" },
-  { title: "山东高速信联科技 (ETC固定通勤段)", amount: "38.00", months: 5, charges: 77, last_on: "2026-10-30" },
-];
 
 const CYCLE_MONTHLY_FACTOR: Record<SubscriptionCycle, number> = {
   week: 52 / 12,
@@ -55,18 +13,25 @@ const CYCLE_MONTHLY_FACTOR: Record<SubscriptionCycle, number> = {
 };
 
 export function SubscriptionsPage(props: {
+  initialSubscriptions?: SubscriptionItem[];
   initialCandidates?: SubscriptionCandidate[];
 }) {
-  const [subs, setSubs] = useState<SubscriptionItem[]>(INITIAL_SUBS);
+  const [subs, setSubs] = useState<SubscriptionItem[]>(props.initialSubscriptions ?? []);
   const [candidates, setCandidates] = useState<SubscriptionCandidate[]>(
-    props.initialCandidates && props.initialCandidates.length > 0
-      ? props.initialCandidates
-      : INITIAL_CANDIDATES,
+    props.initialCandidates ?? [],
   );
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("");
   const [cycle, setCycle] = useState<SubscriptionCycle>("month");
   const [nextDate, setNextDate] = useState("2026-12-01");
+
+  useEffect(() => {
+    setSubs(props.initialSubscriptions ?? []);
+  }, [props.initialSubscriptions]);
+
+  useEffect(() => {
+    setCandidates(props.initialCandidates ?? []);
+  }, [props.initialCandidates]);
 
   const monthlyTotal = subs
     .filter((s) => s.status === "active")
