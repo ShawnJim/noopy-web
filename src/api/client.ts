@@ -165,10 +165,13 @@ export interface SubscriptionCandidate {
   last_on: string;
 }
 
+export type ModelProtocol = "openai" | "anthropic" | "gemini";
+
 export interface ModelDefinition {
   id: string;
   name: string;
   provider: "deepseek" | "dashscope" | "zhipu" | "custom";
+  protocol?: ModelProtocol;
   base_url?: string;
   model: string;
   api_key?: string | null;

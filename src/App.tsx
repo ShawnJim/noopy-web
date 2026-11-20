@@ -18,6 +18,7 @@ import {
   DEMO_LINEAGES,
   DEMO_REVIEWS,
 } from "./data/demoOntology";
+import { COPY, t, type Lang } from "./i18n";
 import { AgentModelSettingsPage } from "./pages/AgentModelSettingsPage";
 import { AssistantPage } from "./pages/AssistantPage";
 import { ImportPage } from "./pages/ImportPage";
@@ -29,31 +30,64 @@ import { SubscriptionsPage } from "./pages/SubscriptionsPage";
 import "./styles/app.css";
 
 type NavKey =
-  | "assistant"
-  | "ledger"
   | "reports"
+  | "ledger"
+  | "assistant"
   | "inbox"
   | "import"
   | "subscriptions"
   | "ontology"
   | "models";
 
-const NAV_TITLES: Record<NavKey, string> = {
-  assistant: "AI 财务助手",
-  ledger: "账本与归因血缘",
-  reports: "多维统计报表",
-  inbox: "证据收件箱",
-  import: "账单导入与解析",
-  subscriptions: "周期订阅与识别",
-  ontology: "本体中心（账户 · 别名 · 规则）",
-  models: "Agent 与本地模型配置",
+const HERO_COPY: Record<NavKey, { eyebrow: string; zh: string; en: string }> = {
+  reports: {
+    eyebrow: "01 / EDITORIAL OVERVIEW",
+    zh: "财务全景与资金脉络",
+    en: "Financial Pulse & Cashflow Sculpture",
+  },
+  ledger: {
+    eyebrow: "02 / ATTRIBUTION LINEAGE",
+    zh: "经济事件与归因血缘",
+    en: "Economic Events & Provenance Graph",
+  },
+  assistant: {
+    eyebrow: "03 / SEMANTIC COPILOT",
+    zh: "自然语言本体推理",
+    en: "Ontology Semantic Reasoning",
+  },
+  inbox: {
+    eyebrow: "04 / EVIDENCE TRIAGE",
+    zh: "证据收件箱与护栏复核",
+    en: "Guardrail & Hypothesis Triage",
+  },
+  import: {
+    eyebrow: "05 / IMMUTABLE INGESTION",
+    zh: "多源账单归档与解锁",
+    en: "Artifact Archive & Solver",
+  },
+  subscriptions: {
+    eyebrow: "06 / RECURRING RHYTHM",
+    zh: "周期承诺与订阅雷达",
+    en: "Recurring Commitments Radar",
+  },
+  ontology: {
+    eyebrow: "07 / CANONICAL GRAPH",
+    zh: "账户载体与跨源别名",
+    en: "Accounts, Instruments & Identity Aliases",
+  },
+  models: {
+    eyebrow: "08 / MULTI-PROTOCOL GATEWAY",
+    zh: "多协议模型与 Agent 路由",
+    en: "OpenAI · Claude · Gemini · Local Gateway",
+  },
 };
 
 const client = new NoopyClient();
 
 export function App() {
-  const [nav, setNav] = useState<NavKey>("ledger");
-  const [theme, setTheme] = useState<ThemeVariant>("foundry");
+  const [nav, setNav] = useState<NavKey>("reports");
+  const [theme, setTheme] = useState<ThemeVariant>("editorial");
+  const [lang, setLang] = useState<Lang>("bi");
   const [scope, setScope] = useState<SpendingScope>("all");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [search, setSearch] = useState("");
@@ -146,197 +180,173 @@ export function App() {
 
   const handleRunSolver = async () => {
     if (mode === "demo") {
-      return "Demo 模式：连接本机 noopy-core (/v2/solver/run) 后将执行纯 Rust 5 阶段求解器并落库 PostgreSQL。";
+      return "Demo Mode · Connect local noopy-core (/v2/solver/run) to execute 5-stage Rust solver & PostgreSQL persistence.";
     }
     const res = await client.runSolver([]);
     await loadAll(scope);
     return JSON.stringify(res, null, 2);
   };
 
+  const hero = HERO_COPY[nav];
+
   return (
-    <div className="frame" data-theme={theme}>
-      <aside className="sidebar">
-        <div className="sidebar-brand">
-          <span className="brand-title">Noopy Ontology</span>
-          <span className="brand-ver">v2.0</span>
-        </div>
+    <div className="designer-shell" data-theme={theme}>
+      <div className="ambient-orb" />
 
-        <nav className="nav-group" aria-label="主导航">
-          <div className="nav-section-label">分析与助手</div>
-          <button
-            className={`nav-item ${nav === "assistant" ? "active" : ""}`}
-            onClick={() => setNav("assistant")}
-          >
-            <span>AI 助手</span>
-          </button>
-          <button
-            className={`nav-item ${nav === "ledger" ? "active" : ""}`}
-            onClick={() => setNav("ledger")}
-          >
-            <span>账本与血缘</span>
-            <span className="nav-count">{spending.active_event_count}</span>
-          </button>
-          <button
-            className={`nav-item ${nav === "reports" ? "active" : ""}`}
-            onClick={() => setNav("reports")}
-          >
-            <span>统计报表</span>
-          </button>
-          <button
-            className={`nav-item ${nav === "inbox" ? "active" : ""}`}
-            onClick={() => setNav("inbox")}
-          >
-            <span>证据收件箱</span>
-            <span className="nav-count">{reviews.length}</span>
-          </button>
-
-          <div className="nav-section-label" style={{ marginTop: 8 }}>
-            数据与运营
+      <header className="floating-header">
+        <div className="glass-dock">
+          <div className="dock-brand">
+            <span className="dock-logo">Noopy</span>
+            <span className="dock-edition">Ontology · v2</span>
           </div>
-          <button
-            className={`nav-item ${nav === "import" ? "active" : ""}`}
-            onClick={() => setNav("import")}
-          >
-            <span>账单导入</span>
-          </button>
-          <button
-            className={`nav-item ${nav === "subscriptions" ? "active" : ""}`}
-            onClick={() => setNav("subscriptions")}
-          >
-            <span>周期订阅</span>
-          </button>
-          <button
-            className={`nav-item ${nav === "ontology" ? "active" : ""}`}
-            onClick={() => setNav("ontology")}
-          >
-            <span>本体与账户</span>
-            <span className="nav-count">{aliases.length}</span>
-          </button>
 
-          <div className="nav-section-label" style={{ marginTop: 8 }}>
-            系统与模型
-          </div>
-          <button
-            className={`nav-item ${nav === "models" ? "active" : ""}`}
-            onClick={() => setNav("models")}
-          >
-            <span>Agent 与本地模型</span>
-          </button>
-        </nav>
+          <nav className="dock-nav" aria-label="Primary Navigation">
+            {(
+              [
+                "reports",
+                "ledger",
+                "assistant",
+                "inbox",
+                "import",
+                "subscriptions",
+                "ontology",
+                "models",
+              ] as const
+            ).map((key) => (
+              <button
+                key={key}
+                className={`dock-link ${nav === key ? "active" : ""}`}
+                onClick={() => setNav(key)}
+              >
+                {t(COPY.nav[key], lang === "bi" ? "zh" : lang)}
+              </button>
+            ))}
+          </nav>
 
-        <div className="sidebar-footer">
-          <div className="status-line">
-            <span className={`status-dot ${mode === "demo" ? "demo" : ""}`} />
-            <span>{mode === "live" ? "Live /v2 PostgreSQL" : "Demo 离线模式"}</span>
-          </div>
-          <div className="mono">6/6 Invariants · 0 violations</div>
-        </div>
-      </aside>
-
-      <div className="workspace">
-        <header className="topbar">
-          <h1 className="topbar-title">{NAV_TITLES[nav]}</h1>
-          <div className="topbar-controls">
-            <div className="seg" role="group" aria-label="亲情卡口径">
+          <div className="dock-controls">
+            <div className="seg" role="group" aria-label="Language Switcher">
               {(
                 [
-                  ["all", "全部口径"],
-                  ["personal", "仅个人"],
-                  ["household", "仅家庭"],
+                  ["bi", "中·EN"],
+                  ["zh", "中文"],
+                  ["en", "EN"],
                 ] as const
-              ).map(([val, label]) => (
+              ).map(([code, label]) => (
                 <button
-                  key={val}
-                  className={scope === val ? "active" : ""}
-                  onClick={() => setScope(val)}
+                  key={code}
+                  className={lang === code ? "active" : ""}
+                  onClick={() => setLang(code)}
                 >
                   {label}
                 </button>
               ))}
             </div>
 
-            <div className="seg" role="group" aria-label="余额证实口径">
+            <select
+              className="input"
+              style={{ borderRadius: 999, padding: "5px 11px", fontSize: 12 }}
+              value={theme}
+              onChange={(e) => setTheme(e.target.value as ThemeVariant)}
+            >
+              <option value="editorial"> Atelier Paper · 纸感编辑</option>
+              <option value="obsidian">Obsidian Noir · 黑曜暗夜</option>
+              <option value="foundry">Swiss Studio · 瑞士画廊</option>
+              <option value="mercury">Nordic Mist · 北欧雾白</option>
+            </select>
+          </div>
+        </div>
+      </header>
+
+      <main key={`${nav}-${lang}`} className="editorial-stage">
+        <section className="editorial-hero">
+          <div>
+            <div className="hero-eyebrow">
+              {hero.eyebrow} · {mode === "live" ? "LIVE POSTGRESQL" : "STUDIO PREVIEW"} · 6/6 INVARIANTS PASS
+            </div>
+            <h1 className="hero-headline">{t({ zh: hero.zh, en: hero.en }, lang)}</h1>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div className="seg">
+              {(["all", "personal", "household"] as const).map((sc) => (
+                <button
+                  key={sc}
+                  className={scope === sc ? "active" : ""}
+                  onClick={() => setScope(sc)}
+                >
+                  {t(COPY.scope[sc], lang === "bi" ? "zh" : lang)}
+                </button>
+              ))}
+            </div>
+
+            <div className="seg">
               <button
                 className={!verifiedOnly ? "active" : ""}
                 onClick={() => setVerifiedOnly(false)}
               >
-                含推断
+                {t(COPY.ver.all, lang === "bi" ? "zh" : lang)}
               </button>
               <button
                 className={verifiedOnly ? "active" : ""}
                 onClick={() => setVerifiedOnly(true)}
               >
-                仅已证实
+                {t(COPY.ver.verified, lang === "bi" ? "zh" : lang)}
               </button>
             </div>
-
-            <select
-              className="input"
-              aria-label="界面风格切换"
-              value={theme}
-              onChange={(e) => setTheme(e.target.value as ThemeVariant)}
-            >
-              <option value="foundry">风格 A · Foundry 精密台</option>
-              <option value="editorial">风格 B · Editorial 手账风</option>
-              <option value="obsidian">风格 C · Obsidian 暗色台</option>
-              <option value="mercury">风格 D · Mercury 极简风</option>
-            </select>
           </div>
-        </header>
+        </section>
 
-        <main className="content">
-          {nav === "assistant" && (
-            <AssistantPage
-              spending={spending}
-              balances={balances}
-              aliases={aliases}
-              events={events}
-              onInspectEvent={(id) => {
-                setSelectedId(id);
-                setNav("ledger");
-              }}
-            />
-          )}
-          {nav === "ledger" && (
-            <LedgerPage
-              events={events}
-              spending={spending}
-              scope={scope}
-              search={search}
-              onSearchChange={setSearch}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              lineage={lineage}
-            />
-          )}
-          {nav === "reports" && <ReportsPage scope={scope} spending={spending} />}
-          {nav === "inbox" && (
-            <InboxPage
-              reviews={reviews}
-              onResolve={(idx) => setReviews((prev) => prev.filter((_, i) => i !== idx))}
-            />
-          )}
-          {nav === "import" && (
-            <ImportPage
-              accounts={balances}
-              onUploadFile={async (f, aid) => {
-                await client.uploadFile(f, aid);
-              }}
-              onRunSolver={handleRunSolver}
-            />
-          )}
-          {nav === "subscriptions" && <SubscriptionsPage />}
-          {nav === "ontology" && (
-            <OntologyPage
-              balances={balances}
-              aliases={aliases}
-              verifiedOnly={verifiedOnly}
-              onRunSolver={handleRunSolver}
-            />
-          )}
-          {nav === "models" && <AgentModelSettingsPage client={client} />}
-        </main>
-      </div>
+        {nav === "reports" && <ReportsPage scope={scope} spending={spending} />}
+        {nav === "ledger" && (
+          <LedgerPage
+            events={events}
+            spending={spending}
+            scope={scope}
+            search={search}
+            onSearchChange={setSearch}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            lineage={lineage}
+          />
+        )}
+        {nav === "assistant" && (
+          <AssistantPage
+            spending={spending}
+            balances={balances}
+            aliases={aliases}
+            events={events}
+            onInspectEvent={(id) => {
+              setSelectedId(id);
+              setNav("ledger");
+            }}
+          />
+        )}
+        {nav === "inbox" && (
+          <InboxPage
+            reviews={reviews}
+            onResolve={(idx) => setReviews((prev) => prev.filter((_, i) => i !== idx))}
+          />
+        )}
+        {nav === "import" && (
+          <ImportPage
+            accounts={balances}
+            onUploadFile={async (f, aid) => {
+              await client.uploadFile(f, aid);
+            }}
+            onRunSolver={handleRunSolver}
+          />
+        )}
+        {nav === "subscriptions" && <SubscriptionsPage />}
+        {nav === "ontology" && (
+          <OntologyPage
+            balances={balances}
+            aliases={aliases}
+            verifiedOnly={verifiedOnly}
+            onRunSolver={handleRunSolver}
+          />
+        )}
+        {nav === "models" && <AgentModelSettingsPage client={client} />}
+      </main>
     </div>
   );
 }
