@@ -8,7 +8,6 @@ import {
   type ReviewItem,
   type SpendingScope,
   type SpendingSummary,
-  type ThemeVariant,
 } from "./api/client";
 import {
   computeDemoSpending,
@@ -86,7 +85,6 @@ const client = new NoopyClient();
 
 export function App() {
   const [nav, setNav] = useState<NavKey>("reports");
-  const [theme, setTheme] = useState<ThemeVariant>("editorial");
   const [lang, setLang] = useState<Lang>("bi");
   const [scope, setScope] = useState<SpendingScope>("all");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
@@ -190,14 +188,15 @@ export function App() {
   const hero = HERO_COPY[nav];
 
   return (
-    <div className="designer-shell" data-theme={theme}>
+    <div className="designer-shell">
       <div className="ambient-orb" />
+      <div className="ambient-orb-secondary" />
 
       <header className="floating-header">
         <div className="glass-dock">
           <div className="dock-brand">
             <span className="dock-logo">Noopy</span>
-            <span className="dock-edition">Ontology · v2</span>
+            <span className="dock-edition">Atelier Paper · v2</span>
           </div>
 
           <nav className="dock-nav" aria-label="Primary Navigation">
@@ -241,18 +240,6 @@ export function App() {
                 </button>
               ))}
             </div>
-
-            <select
-              className="input"
-              style={{ borderRadius: 999, padding: "5px 11px", fontSize: 12 }}
-              value={theme}
-              onChange={(e) => setTheme(e.target.value as ThemeVariant)}
-            >
-              <option value="editorial"> Atelier Paper · 纸感编辑</option>
-              <option value="obsidian">Obsidian Noir · 黑曜暗夜</option>
-              <option value="foundry">Swiss Studio · 瑞士画廊</option>
-              <option value="mercury">Nordic Mist · 北欧雾白</option>
-            </select>
           </div>
         </div>
       </header>

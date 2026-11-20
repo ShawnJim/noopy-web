@@ -112,7 +112,7 @@ export function ReportsPage(props: {
               overflowX: "auto",
             }}
           >
-            {monthly.map((m) => {
+            {monthly.map((m, idx) => {
               const p = Number(m.personal);
               const h = Number(m.household);
               const val = seriesVal(m);
@@ -122,7 +122,14 @@ export function ReportsPage(props: {
               return (
                 <div
                   key={m.month}
-                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}
+                  className="bar-col"
+                  style={{
+                    animationDelay: `${idx * 0.03}s`,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
                 >
                   <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-muted)" }}>
                     ¥{Math.round(val)}
