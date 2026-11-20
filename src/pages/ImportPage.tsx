@@ -7,9 +7,10 @@ export function ImportPage(props: {
   isDemo?: boolean;
   onUploadFile?: (file: File, accountId?: string) => Promise<SourceFileRecord | void>;
   onUnlockFile?: (fileId: string, password: string) => Promise<SourceFileRecord | void>;
+  onRefreshFiles?: () => Promise<void>;
   onRunSolver: () => Promise<string>;
 }) {
-  const { accounts, isDemo = false, onUploadFile, onUnlockFile, onRunSolver } = props;
+  const { accounts, isDemo = false, onUploadFile, onUnlockFile, onRefreshFiles, onRunSolver } = props;
   const [files, setFiles] = useState<SourceFileRecord[]>(props.files ?? []);
   const [accountId, setAccountId] = useState<string>("");
   const [dragOver, setDragOver] = useState(false);
@@ -17,11 +18,19 @@ export function ImportPage(props: {
   const [solverLog, setSolverLog] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setFiles(props.files ?? []);
   }, [props.files]);
+
+  const scheduleRefresh = () => {
+    if (!onRefreshFiles || isDemo) return;
+    window.setTimeout(() => {
+      void onRefreshFiles();
+    }, 1800);
+  };
 
   const handleFiles = async (list: FileList | null) => {
     if (!list || list.length === 0) return;
@@ -57,7 +66,8 @@ export function ImportPage(props: {
       try {
         const uploaded = await onUploadFile(file, accountId || undefined);
         if (uploaded) {
-          setFiles((prev) => [uploaded, ...prev]);
+          setFiles((prev) => [uploaded, ...prev.filter((x) => x.id !== uploaded.id)]);
+          scheduleRefresh();
         }
       } catch (err) {
         setErrorMsg(`上传 ${file.name} 失败：${err instanceof Error ? err.message : String(err)}`);
@@ -90,9 +100,23 @@ export function ImportPage(props: {
       const updated = await onUnlockFile(id, pwd);
       if (updated) {
         setFiles((prev) => prev.map((f) => (f.id === id ? updated : f)));
+        scheduleRefresh();
       }
     } catch (err) {
       setErrorMsg(`解锁失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const handleManualRefresh = async () => {
+    if (!onRefreshFiles) return;
+    setRefreshing(true);
+    setErrorMsg(null);
+    try {
+      await onRefreshFiles();
+    } catch (err) {
+      setErrorMsg(`刷新失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -230,6 +254,11 @@ export function ImportPage(props: {
       <section className="surface">
         <div className="surface-header">
           <h2 className="surface-title">已归档账单文件批次（Artifacts · {files.length}）</h2>
+          {onRefreshFiles && (
+            <button className="btn" disabled={refreshing} onClick={() => void handleManualRefresh()}>
+              {refreshing ? "同步中..." : "刷新解析与求解状态"}
+            </button>
+          )}
         </div>
         <div className="data-table-wrap" style={{ maxHeight: 340 }}>
           <table className="data-table">

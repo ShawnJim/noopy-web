@@ -4,10 +4,13 @@ import {
   type AccountBalance,
   type AccountFlowItem,
   type AttributionLineageTree,
+  type CategoryRecord,
+  type CategoryStatItem,
   type EconomicEvent,
   type IdentityAlias,
   type MerchantRankItem,
   type MonthlyReportPoint,
+  type ProposalRecord,
   type ReviewItem,
   type SourceFileRecord,
   type SpendingScope,
@@ -36,6 +39,8 @@ type NavKey =
   | "subscriptions"
   | "ontology"
   | "models";
+
+const PAGE_SIZE = 50;
 
 const HERO_COPY: Record<NavKey, { eyebrow: string; zh: string; en: string }> = {
   reports: {
@@ -94,74 +99,6 @@ function emptySpending(scope: SpendingScope): SpendingSummary {
   };
 }
 
-function aggregateLiveReports(
-  events: EconomicEvent[],
-  balances: AccountBalance[],
-): {
-  monthly: MonthlyReportPoint[];
-  merchants: MerchantRankItem[];
-  accountFlows: AccountFlowItem[];
-} {
-  const monthMap = new Map<string, { personal: number; household: number; income: number; count: number }>();
-  const merchMap = new Map<string, { amount: number; count: number }>();
-
-  for (const ev of events) {
-    const month = ev.occurred_at.slice(0, 7);
-    const amt = Math.abs(Number(ev.amount) || 0);
-    const m = monthMap.get(month) ?? { personal: 0, household: 0, income: 0, count: 0 };
-    m.count += 1;
-    const isHousehold =
-      ev.kind === "family_card_spend" ||
-      (Boolean(ev.beneficiary_party_id) && ev.beneficiary_party_id !== "party:self");
-    if (ev.kind === "income") {
-      m.income += amt;
-    } else if (isHousehold) {
-      m.household += amt;
-    } else if (ev.kind === "expense" || ev.kind === "purchase" || ev.kind === "fee") {
-      m.personal += amt;
-    }
-    monthMap.set(month, m);
-
-    if (ev.kind === "expense" || ev.kind === "purchase" || isHousehold) {
-      const key = ev.title || "未命名商户";
-      const cur = merchMap.get(key) ?? { amount: 0, count: 0 };
-      cur.amount += amt;
-      cur.count += 1;
-      merchMap.set(key, cur);
-    }
-  }
-
-  const monthly: MonthlyReportPoint[] = Array.from(monthMap.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, v]) => ({
-      month,
-      personal: v.personal.toFixed(2),
-      household: v.household.toFixed(2),
-      income: v.income.toFixed(2),
-      count: v.count,
-    }));
-
-  const merchants: MerchantRankItem[] = Array.from(merchMap.entries())
-    .sort(([, a], [, b]) => b.amount - a.amount)
-    .slice(0, 12)
-    .map(([name, v]) => ({ name, amount: v.amount.toFixed(2), count: v.count }));
-
-  const accountFlows: AccountFlowItem[] = balances.map((b) => {
-    const total = Number(b.total_balance) || 0;
-    const hasVerified = Number(b.verified_balance) !== 0;
-    return {
-      account_id: b.account_id,
-      name: b.account_id,
-      outflow: total < 0 ? Math.abs(total).toFixed(2) : "0.00",
-      inflow: total > 0 ? total.toFixed(2) : "0.00",
-      verified: hasVerified ? 1 : 0,
-      inferred: b.inferred_leg_count,
-    };
-  });
-
-  return { monthly, merchants, accountFlows };
-}
-
 const client = new NoopyClient(API_BASE_URL);
 
 export function App() {
@@ -170,12 +107,19 @@ export function App() {
   const [scope, setScope] = useState<SpendingScope>("all");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
 
   const [events, setEvents] = useState<EconomicEvent[]>([]);
+  const [eventsTotal, setEventsTotal] = useState(0);
   const [balances, setBalances] = useState<AccountBalance[]>([]);
   const [aliases, setAliases] = useState<IdentityAlias[]>([]);
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
+  const [proposals, setProposals] = useState<ProposalRecord[]>([]);
+  const [categories, setCategories] = useState<CategoryRecord[]>([]);
   const [spending, setSpending] = useState<SpendingSummary>(() => emptySpending("all"));
+  const [monthly, setMonthly] = useState<MonthlyReportPoint[]>([]);
+  const [merchants, setMerchants] = useState<MerchantRankItem[]>([]);
+  const [categoryStats, setCategoryStats] = useState<CategoryStatItem[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [lineage, setLineage] = useState<AttributionLineageTree | null>(null);
 
@@ -183,11 +127,10 @@ export function App() {
   const [subs, setSubs] = useState<SubscriptionItem[]>([]);
   const [subCandidates, setSubCandidates] = useState<SubscriptionCandidate[]>([]);
 
-  // Demo-only optional overrides (only populated when VITE_DEMO_MODE === "true")
-  const [demoMonthly, setDemoMonthly] = useState<MonthlyReportPoint[] | undefined>(undefined);
-  const [demoMerchants, setDemoMerchants] = useState<MerchantRankItem[] | undefined>(undefined);
+  // Demo-only optional caches (only loaded dynamically when VITE_DEMO_MODE === "true")
   const [demoFlows, setDemoFlows] = useState<AccountFlowItem[] | undefined>(undefined);
   const demoLineagesRef = useRef<Record<string, AttributionLineageTree>>({});
+  const demoEventsRef = useRef<EconomicEvent[]>([]);
 
   // Live backend connection & auth state
   const [connStatus, setConnStatus] = useState<"loading" | "connected" | "error">(
@@ -198,57 +141,84 @@ export function App() {
   const [loginPassword, setLoginPassword] = useState("noopy-dev-password");
   const [loggingIn, setLoggingIn] = useState(false);
 
+  const ensureAuth = useCallback(
+    async (forceRelogin = false) => {
+      if (forceRelogin) {
+        window.localStorage.removeItem("noopy_v2_token");
+      }
+      const cached = window.localStorage.getItem("noopy_v2_token");
+      if (cached) {
+        client.setToken(cached);
+      } else {
+        const tok = await client.login(loginEmail, loginPassword);
+        window.localStorage.setItem("noopy_v2_token", tok);
+      }
+    },
+    [loginEmail, loginPassword],
+  );
+
+  const loadLiveEvents = useCallback(
+    async (activeScope: SpendingScope, kw: string, activePage: number) => {
+      const evs = await client.queryObjects<EconomicEvent>({
+        object_type: "economic_event",
+        scope: activeScope,
+        search: kw.trim() || undefined,
+        limit: PAGE_SIZE,
+        offset: activePage * PAGE_SIZE,
+      });
+      setEvents(evs.items);
+      setEventsTotal(evs.total);
+      setSelectedId((prev) =>
+        evs.items.length === 0
+          ? null
+          : prev && evs.items.some((e) => e.id === prev)
+            ? prev
+            : evs.items[0].id,
+      );
+    },
+    [],
+  );
+
   const loadLive = useCallback(
     async (activeScope: SpendingScope, forceRelogin = false) => {
       setConnStatus("loading");
       setConnError(null);
       try {
-        if (forceRelogin) {
-          window.localStorage.removeItem("noopy_v2_token");
-        }
-        const cached = window.localStorage.getItem("noopy_v2_token");
-        if (cached) {
-          client.setToken(cached);
-        } else {
-          const tok = await client.login(loginEmail, loginPassword);
-          window.localStorage.setItem("noopy_v2_token", tok);
-        }
+        await ensureAuth(forceRelogin);
 
-        const [sp, bal, evs, rev, als] = await Promise.all([
+        const [sp, bal, rev, als, mon, mer, catStat] = await Promise.all([
           client.getSpendingSummary(activeScope),
           client.getBalances(),
-          client.queryObjects<EconomicEvent>({
-            object_type: "economic_event",
-            scope: activeScope,
-            limit: 500,
-          }),
           client.getReviewInbox(),
           client.queryObjects<IdentityAlias>({ object_type: "identity_alias", limit: 300 }),
+          client.getMonthlyStats(activeScope),
+          client.getMerchantStats(activeScope, 15),
+          client.getCategoryStats(activeScope),
         ]);
 
-        // Optional v1 endpoints (best-effort; empty array if not yet populated)
-        const [fileRes, subRes, candRes] = await Promise.allSettled([
+        const [fileRes, subRes, candRes, catRes, propRes] = await Promise.allSettled([
           client.listFiles(),
           client.getSubscriptions(),
           client.detectSubscriptions(),
+          client.listCategories(),
+          client.listProposals("pending"),
         ]);
 
         setSpending(sp);
         setBalances(bal.items);
-        setEvents(evs.items);
         setReviews(rev.items);
         setAliases(als.items);
+        setMonthly(mon.items);
+        setMerchants(mer.items);
+        setCategoryStats(catStat.items);
+
         if (fileRes.status === "fulfilled") setFiles(fileRes.value.items);
         if (subRes.status === "fulfilled") setSubs(subRes.value.items);
         if (candRes.status === "fulfilled") setSubCandidates(candRes.value.items);
+        if (catRes.status === "fulfilled") setCategories(catRes.value.items);
+        if (propRes.status === "fulfilled") setProposals(propRes.value.items);
 
-        setSelectedId((prev) =>
-          evs.items.length === 0
-            ? null
-            : prev && evs.items.some((e) => e.id === prev)
-              ? prev
-              : evs.items[0].id,
-        );
+        await loadLiveEvents(activeScope, search, page);
         setConnStatus("connected");
       } catch (err) {
         if (!forceRelogin && window.localStorage.getItem("noopy_v2_token")) {
@@ -258,7 +228,7 @@ export function App() {
         setConnError(err instanceof Error ? err.message : String(err));
       }
     },
-    [loginEmail, loginPassword],
+    [ensureAuth, loadLiveEvents, search, page],
   );
 
   useEffect(() => {
@@ -267,17 +237,20 @@ export function App() {
       import("./data/demoOntology").then((mod) => {
         if (!active) return;
         demoLineagesRef.current = mod.DEMO_LINEAGES;
+        demoEventsRef.current = mod.DEMO_EVENTS;
         setSpending(mod.computeDemoSpending(scope));
         setBalances(mod.DEMO_BALANCES);
-        setEvents(mod.DEMO_EVENTS);
         setReviews(mod.DEMO_REVIEWS);
         setAliases(mod.DEMO_ALIASES);
-        setDemoMonthly(mod.DEMO_MONTHLY);
-        setDemoMerchants(mod.DEMO_MERCHANTS);
+        setMonthly(mod.DEMO_MONTHLY);
+        setMerchants(mod.DEMO_MERCHANTS);
+        setCategoryStats(mod.DEMO_CATEGORY_STATS);
         setDemoFlows(mod.DEMO_ACCOUNTS);
         setFiles(mod.DEMO_FILES);
         setSubs(mod.DEMO_SUBS);
         setSubCandidates(mod.DEMO_SUB_CANDIDATES);
+        setEvents(mod.DEMO_EVENTS);
+        setEventsTotal(mod.DEMO_EVENTS.length);
         setSelectedId((prev) => prev ?? mod.DEMO_EVENTS[0]?.id ?? null);
         setConnStatus("connected");
       });
@@ -288,6 +261,28 @@ export function App() {
 
     void loadLive(scope);
   }, [scope, loadLive]);
+
+  // Paginated & server-searched LedgerPage event loading
+  useEffect(() => {
+    if (IS_DEMO_MODE) {
+      const q = search.trim().toLowerCase();
+      const filtered = demoEventsRef.current.filter((e) => {
+        const isFam =
+          e.payer_party_id === "party:family" || e.beneficiary_party_id === "party:family";
+        if (scope === "personal" && isFam) return false;
+        if (scope === "household" && !isFam) return false;
+        if (q && !e.title.toLowerCase().includes(q) && !e.id.toLowerCase().includes(q)) {
+          return false;
+        }
+        return true;
+      });
+      setEventsTotal(filtered.length);
+      setEvents(filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE));
+      return;
+    }
+    if (connStatus !== "connected") return;
+    void loadLiveEvents(scope, search, page).catch(() => undefined);
+  }, [scope, search, page, connStatus, loadLiveEvents]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -312,9 +307,17 @@ export function App() {
     };
   }, [selectedId]);
 
-  const liveReports = useMemo(
-    () => (IS_DEMO_MODE ? null : aggregateLiveReports(events, balances)),
-    [events, balances],
+  const liveAccountFlows = useMemo<AccountFlowItem[]>(
+    () =>
+      balances.map((b) => ({
+        account_id: b.account_id,
+        name: b.account_name || b.account_id,
+        outflow: b.outflow ?? (Number(b.total_balance) < 0 ? Math.abs(Number(b.total_balance)).toFixed(2) : "0.00"),
+        inflow: b.inflow ?? (Number(b.total_balance) > 0 ? Number(b.total_balance).toFixed(2) : "0.00"),
+        verified: b.verified_leg_count ?? 0,
+        inferred: b.inferred_leg_count,
+      })),
+    [balances],
   );
 
   const handleManualLogin = async (e: React.FormEvent) => {
@@ -334,6 +337,97 @@ export function App() {
     const res = await client.runSolver([]);
     await loadLive(scope);
     return JSON.stringify(res, null, 2);
+  };
+
+  const handleResolveReview = async (item: ReviewItem, action: "confirm" | "ignore") => {
+    const key = item.review_key ?? `${item.kind}::${[...item.observation_ids].sort().join(",")}`;
+    if (IS_DEMO_MODE) {
+      setReviews((prev) =>
+        prev.filter((r) => (r.review_key ?? `${r.kind}::${[...r.observation_ids].sort().join(",")}`) !== key),
+      );
+      return;
+    }
+    await client.resolveReview({
+      review_key: key,
+      review_kind: item.kind,
+      action,
+      payload: item.evidence,
+    });
+    await loadLive(scope);
+  };
+
+  const handleApproveProposal = async (proposalId: string) => {
+    if (IS_DEMO_MODE) {
+      setProposals((prev) => prev.filter((p) => p.id !== proposalId));
+      return;
+    }
+    await client.approveProposal(proposalId);
+    await loadLive(scope);
+  };
+
+  const handleRejectProposal = async (proposalId: string) => {
+    if (IS_DEMO_MODE) {
+      setProposals((prev) => prev.filter((p) => p.id !== proposalId));
+      return;
+    }
+    await client.rejectProposal(proposalId);
+    await loadLive(scope);
+  };
+
+  const handleSetEventCategory = async (eventId: string, categoryId: string) => {
+    if (IS_DEMO_MODE) return;
+    await client.setEventCategory(eventId, categoryId);
+    const [tree, catStat] = await Promise.all([
+      client.explainAttribution("economic_event", eventId),
+      client.getCategoryStats(scope),
+    ]);
+    setLineage(tree);
+    setCategoryStats(catStat.items);
+  };
+
+  const handleCreateSubscription = async (input: {
+    name: string;
+    merchant?: string;
+    amount: string;
+    currency: string;
+    cycle: "week" | "month" | "quarter" | "year";
+    next_charge_on: string;
+    account_id?: string | null;
+    category_id?: string | null;
+    detected_by: "user" | "agent";
+  }) => {
+    const value: Record<string, unknown> = {
+      name: input.name,
+      amount: input.amount,
+      currency: input.currency,
+      cycle: input.cycle,
+      next_charge_on: input.next_charge_on,
+      detected_by: input.detected_by,
+    };
+    if (input.merchant) value.merchant = input.merchant;
+    if (input.account_id) value.account_id = input.account_id;
+    if (input.category_id) value.category_id = input.category_id;
+
+    await client.createProposal(`新建订阅：${input.name}`, [
+      { type: "subscription.create", as: "$s", value },
+    ]);
+    await loadLive(scope);
+  };
+
+  const handleToggleSubscription = async (
+    sub: SubscriptionItem,
+    nextStatus: "active" | "paused",
+  ) => {
+    const baseVersions: Record<string, number> = {};
+    if (typeof sub.version === "number") {
+      baseVersions[`subscription:${sub.id}`] = sub.version;
+    }
+    await client.createProposal(
+      `${nextStatus === "paused" ? "暂停" : "恢复"}订阅：${sub.name}`,
+      [{ type: "subscription.update", id: sub.id, set: { status: nextStatus } }],
+      baseVersions,
+    );
+    await loadLive(scope);
   };
 
   const hero = HERO_COPY[nav];
@@ -403,7 +497,7 @@ export function App() {
             className="surface"
             style={{
               marginBottom: 16,
-              borderColor: "var(--sem-warn, #c44)",
+              borderColor: "var(--sem-danger, #9f2d2d)",
             }}
           >
             <div className="surface-header">
@@ -415,7 +509,7 @@ export function App() {
                 错误信息：<code className="mono">{connError}</code>
               </div>
               <form
-                onSubmit={handleManualLogin}
+                onSubmit={(e) => void handleManualLogin(e)}
                 style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}
               >
                 <input
@@ -463,7 +557,10 @@ export function App() {
                 <button
                   key={sc}
                   className={scope === sc ? "active" : ""}
-                  onClick={() => setScope(sc)}
+                  onClick={() => {
+                    setScope(sc);
+                    setPage(0);
+                  }}
                 >
                   {t(COPY.scope[sc], lang === "bi" ? "zh" : lang)}
                 </button>
@@ -491,22 +588,32 @@ export function App() {
           <ReportsPage
             scope={scope}
             spending={spending}
-            monthly={IS_DEMO_MODE ? demoMonthly : liveReports?.monthly}
-            merchants={IS_DEMO_MODE ? demoMerchants : liveReports?.merchants}
-            accountFlows={IS_DEMO_MODE ? demoFlows : liveReports?.accountFlows}
+            monthly={monthly}
+            merchants={merchants}
+            categories={categoryStats}
+            accountFlows={IS_DEMO_MODE ? demoFlows : liveAccountFlows}
             onGoImport={() => setNav("import")}
           />
         )}
         {nav === "ledger" && (
           <LedgerPage
             events={events}
+            totalCount={eventsTotal}
+            page={page}
+            pageSize={PAGE_SIZE}
+            onPageChange={setPage}
             spending={spending}
             scope={scope}
             search={search}
-            onSearchChange={setSearch}
+            onSearchChange={(v) => {
+              setSearch(v);
+              setPage(0);
+            }}
             selectedId={selectedId}
             onSelect={setSelectedId}
             lineage={lineage}
+            categories={categories}
+            onSetEventCategory={IS_DEMO_MODE ? undefined : handleSetEventCategory}
           />
         )}
         {nav === "assistant" && (
@@ -527,7 +634,10 @@ export function App() {
         {nav === "inbox" && (
           <InboxPage
             reviews={reviews}
-            onResolve={(idx) => setReviews((prev) => prev.filter((_, i) => i !== idx))}
+            proposals={proposals}
+            onResolveReview={handleResolveReview}
+            onApproveProposal={handleApproveProposal}
+            onRejectProposal={handleRejectProposal}
           />
         )}
         {nav === "import" && (
@@ -537,6 +647,9 @@ export function App() {
             isDemo={IS_DEMO_MODE}
             onUploadFile={async (f, aid) => client.uploadFile(f, aid)}
             onUnlockFile={async (fid, pwd) => client.unlockFilePassword(fid, pwd)}
+            onRefreshFiles={async () => {
+              await loadLive(scope);
+            }}
             onRunSolver={handleRunSolver}
           />
         )}
@@ -544,6 +657,9 @@ export function App() {
           <SubscriptionsPage
             initialSubscriptions={subs}
             initialCandidates={subCandidates}
+            isDemo={IS_DEMO_MODE}
+            onCreateSubscription={handleCreateSubscription}
+            onToggleStatus={handleToggleSubscription}
           />
         )}
         {nav === "ontology" && (
@@ -554,7 +670,7 @@ export function App() {
             onRunSolver={handleRunSolver}
           />
         )}
-        {nav === "models" && <AgentModelSettingsPage client={client} />}
+        {nav === "models" && <AgentModelSettingsPage client={client} isDemo={IS_DEMO_MODE} />}
       </main>
     </div>
   );

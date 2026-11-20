@@ -1,6 +1,7 @@
 /**
  * Noopy v2 全量强类型 API 客户端（完整覆盖 /v2/ontology/* 与 /v1/* 全部操作面：
- * 文件上传导入、统计报表、周期订阅与自动识别、多模型注册表与本地 Ollama/vLLM 配置、6 角色 Agent 绑定）。
+ * 文件上传导入与自动求解、全量后端报表、周期订阅提案、多协议模型注册表与 6 角色 Agent 绑定、
+ * 本体复核持久化解算、提案审批与真实 SSE 对话）。
  */
 
 export type SpendingScope = "personal" | "household" | "all";
@@ -29,6 +30,15 @@ export interface LedgerLeg {
   currency: string;
   occurred_at: string;
   verification_state: VerificationState;
+}
+
+export interface AllocationRecord {
+  id: string;
+  event_id: string;
+  category_id: string;
+  amount: string;
+  base_amount: string;
+  attribution_trace?: Record<string, unknown>;
 }
 
 export interface Observation {
@@ -78,15 +88,20 @@ export interface AttributionLineageTree {
       observation?: Observation | null;
     }[];
   }[];
+  allocations?: AllocationRecord[];
   related_events: Record<string, unknown>[];
   matched_aliases: IdentityAlias[];
 }
 
 export interface AccountBalance {
   account_id: string;
+  account_name?: string;
   currency: string;
   verified_balance: string;
   total_balance: string;
+  outflow?: string;
+  inflow?: string;
+  verified_leg_count?: number;
   inferred_leg_count: number;
 }
 
@@ -103,20 +118,46 @@ export interface SpendingSummary {
 }
 
 export interface ReviewItem {
+  review_key?: string;
   kind: string;
   observation_ids: string[];
   reason: string;
   evidence: Record<string, unknown>;
 }
 
+export interface ProposalRecord {
+  id: string;
+  status: string;
+  intent: string;
+  actor_type?: string;
+  actor_id?: string;
+  confidence?: string | number | null;
+  ops?: Record<string, unknown>[];
+  evidence?: Record<string, unknown> | null;
+  created_at?: string;
+}
+
+export interface CategoryRecord {
+  id: string;
+  name: string;
+  kind: string;
+  key?: string | null;
+  parent_id?: string | null;
+  archived?: boolean;
+}
+
 export interface SourceFileRecord {
   id: string;
   filename: string;
-  parser_id: string;
-  parse_status: "received" | "parsing" | "needs_password" | "parsed" | "unknown_format" | "failed";
+  parser_id?: string | null;
+  parse_status: "received" | "parsed" | "needs_password" | "unknown_format" | "failed";
   record_count: number;
-  range?: string;
+  posted_count?: number;
+  pending_count?: number;
   error?: string | null;
+  received_at?: string;
+  parsed_at?: string | null;
+  range?: string;
 }
 
 export interface MonthlyReportPoint {
@@ -124,11 +165,20 @@ export interface MonthlyReportPoint {
   personal: string;
   household: string;
   income: string;
+  net_spending?: string;
   count: number;
 }
 
 export interface MerchantRankItem {
+  party_id?: string | null;
   name: string;
+  amount: string;
+  count: number;
+}
+
+export interface CategoryStatItem {
+  category_id: string;
+  category_name: string;
   amount: string;
   count: number;
 }
@@ -153,15 +203,29 @@ export interface SubscriptionItem {
   currency: string;
   cycle: SubscriptionCycle;
   next_charge_on: string;
+  upcoming_on?: string | null;
+  monthly_amount?: string;
+  yearly_amount?: string;
   status: SubscriptionStatus;
+  version?: number;
   flag?: string | null;
 }
 
 export interface SubscriptionCandidate {
-  title: string;
+  key?: string;
+  name?: string;
+  title?: string;
+  merchant?: string;
+  cycle?: SubscriptionCycle;
   amount: string;
-  months: number;
-  charges: number;
+  currency?: string;
+  account_id?: string | null;
+  category_id?: string | null;
+  next_charge_on?: string;
+  count?: number;
+  months?: number;
+  charges?: number;
+  first_on?: string;
   last_on: string;
 }
 
@@ -175,11 +239,54 @@ export interface ModelDefinition {
   base_url?: string;
   model: string;
   api_key?: string | null;
+  api_key_set?: boolean;
+  api_key_hint?: string | null;
   price_input?: string;
   price_output?: string;
 }
 
 export type AgentRole = "chat" | "finance" | "review" | "reconcile" | "subscription" | "summary";
+
+export interface AgentRunLimits {
+  max_steps: number;
+  timeout_seconds: number;
+  max_cost: string;
+  max_tokens: number;
+}
+
+export interface AgentRoleSettingsView {
+  model_id: string | null;
+  escalation_model_id: string | null;
+  fallback_model_ids: string[];
+  escalation_fallback_model_ids: string[];
+  limits: AgentRunLimits;
+  default_limits: AgentRunLimits;
+}
+
+export interface ModelSettingsView {
+  models: ModelDefinition[];
+  source: string;
+  editable: boolean;
+  version: number;
+  updated_at: string | null;
+  agents: Record<AgentRole, AgentRoleSettingsView>;
+  background?: {
+    enabled: boolean;
+    daily_auto_limit: number;
+    daily_manual_limit: number;
+  };
+}
+
+export interface ModelTestResult {
+  ok: boolean;
+  results: {
+    tier: string;
+    model: string;
+    ok: boolean;
+    latency_ms: number;
+    error?: string;
+  }[];
+}
 
 export interface AgentRoleBinding {
   role: AgentRole;
@@ -187,9 +294,9 @@ export interface AgentRoleBinding {
   hint: string;
   model_id: string | null;
   escalation_model_id: string | null;
-  max_steps: number;
-  max_seconds: number;
-  max_cost: string;
+  fallback_model_ids: string[];
+  escalation_fallback_model_ids: string[];
+  limits: AgentRunLimits;
 }
 
 export interface AttributionRuleItem {
@@ -209,6 +316,25 @@ export interface BudgetProgress {
   limit: string;
   spent: string;
   ratio: number;
+}
+
+export interface ChatSessionRecord {
+  id: string;
+  title?: string | null;
+  status: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ChatStoredMessage {
+  id: string;
+  role: "user" | "assistant" | "tool" | "system_note";
+  content: Record<string, unknown>;
+  created_at?: string;
+}
+
+function makeIdempotencyKey(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export class NoopyClient {
@@ -244,7 +370,17 @@ export class NoopyClient {
       ...init,
       headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    if (!res.ok) {
+      const raw = await res.text();
+      try {
+        const parsed = JSON.parse(raw) as { message?: string; error?: string; code?: string };
+        const msg = parsed.message || parsed.error || raw;
+        throw new Error(`HTTP ${res.status}${parsed.code ? ` (${parsed.code})` : ""}: ${msg}`);
+      } catch (inner) {
+        if (inner instanceof Error && inner.message.startsWith("HTTP ")) throw inner;
+        throw new Error(`HTTP ${res.status}: ${raw}`);
+      }
+    }
     return (await res.json()) as T;
   }
 
@@ -277,8 +413,54 @@ export class NoopyClient {
     return this.request<SpendingSummary>(`/v2/ontology/stats/spending?scope=${scope}`);
   }
 
+  getMonthlyStats(scope: SpendingScope) {
+    return this.request<{ scope: SpendingScope; items: MonthlyReportPoint[] }>(
+      `/v2/ontology/stats/monthly?scope=${scope}`,
+    );
+  }
+
+  getMerchantStats(scope: SpendingScope, limit = 15) {
+    return this.request<{ scope: SpendingScope; items: MerchantRankItem[] }>(
+      `/v2/ontology/stats/merchants?scope=${scope}&limit=${limit}`,
+    );
+  }
+
+  getCategoryStats(scope: SpendingScope) {
+    return this.request<{ scope: SpendingScope; items: CategoryStatItem[] }>(
+      `/v2/ontology/stats/categories?scope=${scope}`,
+    );
+  }
+
   getReviewInbox() {
     return this.request<{ total: number; items: ReviewItem[] }>("/v2/ontology/review");
+  }
+
+  resolveReview(body: {
+    review_key: string;
+    review_kind: string;
+    action: "confirm" | "ignore";
+    note?: string;
+    payload?: Record<string, unknown>;
+    alias_raw_value?: string;
+    alias_target_id?: string;
+  }) {
+    return this.request<{ resolved: boolean; review_key: string; action: string; remaining: number }>(
+      "/v2/ontology/review/resolve",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
+  setEventCategory(eventId: string, categoryId: string, note?: string) {
+    return this.request<{ updated: boolean; event_id: string; category_id: string }>(
+      `/v2/ontology/events/${encodeURIComponent(eventId)}/category`,
+      {
+        method: "POST",
+        body: JSON.stringify({ category_id: categoryId, ...(note ? { note } : {}) }),
+      },
+    );
   }
 
   getSqlSnapshot() {
@@ -296,66 +478,123 @@ export class NoopyClient {
     });
   }
 
+  // --- v1 Categories & Proposals ---
+  listCategories() {
+    return this.request<{ items: CategoryRecord[] }>("/v1/categories");
+  }
+
+  listProposals(status = "pending") {
+    return this.request<{ items: ProposalRecord[]; next_cursor?: string | null }>(
+      `/v1/proposals?status=${encodeURIComponent(status)}`,
+    );
+  }
+
+  createProposal(
+    intent: string,
+    ops: Record<string, unknown>[],
+    baseVersions: Record<string, number> = {},
+  ) {
+    return this.request<{ id: string; status: string; created?: Record<string, string> }>(
+      "/v1/proposals",
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": makeIdempotencyKey("prop") },
+        body: JSON.stringify({ intent, ops, base_versions: baseVersions }),
+      },
+    );
+  }
+
+  approveProposal(proposalId: string) {
+    return this.request<ProposalRecord>(
+      `/v1/proposals/${encodeURIComponent(proposalId)}:approve`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": makeIdempotencyKey("approve") },
+        body: JSON.stringify({}),
+      },
+    );
+  }
+
+  rejectProposal(proposalId: string, reason?: string) {
+    return this.request<ProposalRecord>(
+      `/v1/proposals/${encodeURIComponent(proposalId)}:reject`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": makeIdempotencyKey("reject") },
+        body: JSON.stringify(reason ? { reason } : {}),
+      },
+    );
+  }
+
   // --- v1 File Import APIs ---
   listFiles() {
     return this.request<{ items: SourceFileRecord[] }>("/v1/files");
   }
 
-  uploadFile(file: File, accountId?: string) {
+  async uploadFile(file: File, accountId?: string): Promise<SourceFileRecord> {
     const form = new FormData();
     form.append("file", file);
     if (accountId) form.append("account_id", accountId);
-    return this.request<SourceFileRecord>("/v1/files", {
+    const res = await this.request<{ file: SourceFileRecord; duplicate: boolean }>("/v1/files", {
       method: "POST",
-      headers: { "Idempotency-Key": `upload_${file.name}_${file.size}_${Date.now()}` },
+      headers: { "Idempotency-Key": makeIdempotencyKey(`upload_${file.size}`) },
       body: form,
     });
+    return res.file;
   }
 
   unlockFilePassword(fileId: string, password: string) {
-    return this.request<SourceFileRecord>(`/v1/files/${encodeURIComponent(fileId)}:password`, {
+    return this.request<SourceFileRecord>(`/v1/files/${encodeURIComponent(fileId)}:unlock`, {
       method: "POST",
+      headers: { "Idempotency-Key": makeIdempotencyKey("unlock") },
       body: JSON.stringify({ password }),
     });
   }
 
-  // --- v1 Subscriptions & Proposals ---
+  // --- v1 Subscriptions ---
   getSubscriptions() {
     return this.request<{ items: SubscriptionItem[] }>("/v1/subscriptions");
   }
 
-  detectSubscriptions() {
-    return this.request<{ items: SubscriptionCandidate[] }>("/v1/subscriptions:detect");
-  }
-
-  createProposal(intent: string, ops: Record<string, unknown>[]) {
-    return this.request<{ id: string; status: string }>("/v1/proposals", {
-      method: "POST",
-      headers: { "Idempotency-Key": `prop_${Date.now()}` },
-      body: JSON.stringify({ intent, ops, base_versions: {} }),
-    });
+  async detectSubscriptions(): Promise<{ items: SubscriptionCandidate[] }> {
+    const res = await this.request<{
+      today?: string;
+      candidates?: SubscriptionCandidate[];
+      items?: SubscriptionCandidate[];
+    }>("/v1/subscriptions:detect");
+    return { items: res.candidates ?? res.items ?? [] };
   }
 
   // --- v1 Model & Agent Settings ---
   getModelSettings() {
-    return this.request<Record<string, unknown>>("/v1/model-settings");
+    return this.request<ModelSettingsView>("/v1/model-settings");
   }
 
-  saveModelSettings(payload: Record<string, unknown>) {
-    return this.request<Record<string, unknown>>("/v1/model-settings", {
+  saveModelSettings(payload: {
+    version: number;
+    models?: ModelDefinition[];
+    agents?: Record<
+      AgentRole,
+      {
+        model_id: string | null;
+        escalation_model_id: string | null;
+        fallback_model_ids: string[];
+        escalation_fallback_model_ids: string[];
+        limits: AgentRunLimits;
+      }
+    >;
+  }) {
+    return this.request<ModelSettingsView>("/v1/model-settings", {
       method: "PUT",
       body: JSON.stringify(payload),
     });
   }
 
-  testModelSettings(payload: Record<string, unknown>) {
-    return this.request<{ ok?: boolean; latency_ms?: number; model?: string; reply?: string }>(
-      "/v1/model-settings:test",
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      },
-    );
+  testModelSettings(payload: { model: ModelDefinition }) {
+    return this.request<ModelTestResult>("/v1/model-settings:test", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   }
 
   // --- v1 Chat Sessions & SSE Streaming (backed by Agent runtime + v2 Ontology tools) ---
@@ -449,19 +688,3 @@ export class NoopyClient {
     if (buffer.trim()) flushFrame(buffer);
   }
 }
-
-export interface ChatSessionRecord {
-  id: string;
-  title?: string | null;
-  status: string;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface ChatStoredMessage {
-  id: string;
-  role: "user" | "assistant" | "tool" | "system_note";
-  content: Record<string, unknown>;
-  created_at?: string;
-}
-

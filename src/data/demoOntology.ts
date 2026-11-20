@@ -5,10 +5,14 @@
 import type {
   AccountBalance,
   AccountFlowItem,
+  AgentRole,
+  AgentRoleSettingsView,
   AttributionLineageTree,
+  CategoryStatItem,
   EconomicEvent,
   IdentityAlias,
   MerchantRankItem,
+  ModelDefinition,
   MonthlyReportPoint,
   ReviewItem,
   SourceFileRecord,
@@ -439,8 +443,119 @@ export const DEMO_SUBS: SubscriptionItem[] = [
 ];
 
 export const DEMO_SUB_CANDIDATES: SubscriptionCandidate[] = [
-  { title: "万物云（万科物业母公司）", amount: "10.00", months: 9, charges: 95, last_on: "2026-10-28" },
-  { title: "特来电新能源（固定定额充）", amount: "100.00", months: 5, charges: 23, last_on: "2026-08-22" },
-  { title: "山东高速信联科技 (ETC固定通勤段)", amount: "38.00", months: 5, charges: 77, last_on: "2026-10-30" },
+  { name: "万物云（万科物业母公司）", title: "万物云（万科物业母公司）", amount: "10.00", months: 9, charges: 95, count: 95, last_on: "2026-10-28" },
+  { name: "特来电新能源（固定定额充）", title: "特来电新能源（固定定额充）", amount: "100.00", months: 5, charges: 23, count: 23, last_on: "2026-08-22" },
+  { name: "山东高速信联科技 (ETC固定通勤段)", title: "山东高速信联科技 (ETC固定通勤段)", amount: "38.00", months: 5, charges: 77, count: 77, last_on: "2026-10-30" },
 ];
+
+export const DEMO_CATEGORY_STATS: CategoryStatItem[] = [
+  { category_id: "cat_dining", category_name: "餐饮美食", amount: "14820.40", count: 312 },
+  { category_id: "cat_transport", category_name: "交通出行", amount: "8420.80", count: 148 },
+  { category_id: "cat_housing", category_name: "居住物业", amount: "6280.00", count: 98 },
+  { category_id: "cat_digital", category_name: "数码与订阅", amount: "3190.50", count: 44 },
+  { category_id: "cat_daily", category_name: "日用百货", amount: "2940.20", count: 87 },
+];
+
+export const DEMO_MODELS: ModelDefinition[] = [
+  {
+    id: "openai-gpt-4o",
+    name: "OpenAI · GPT-4o",
+    provider: "custom",
+    protocol: "openai",
+    base_url: "https://api.openai.com/v1",
+    model: "gpt-4o",
+    api_key_set: true,
+    api_key_hint: "demo",
+    price_input: "18",
+    price_output: "72",
+  },
+  {
+    id: "claude-sonnet-4",
+    name: "Anthropic · Claude Sonnet 4",
+    provider: "custom",
+    protocol: "anthropic",
+    base_url: "https://api.anthropic.com/v1",
+    model: "claude-sonnet-4-20250514",
+    api_key_set: true,
+    api_key_hint: "demo",
+    price_input: "22",
+    price_output: "110",
+  },
+  {
+    id: "gemini-2.5-pro",
+    name: "Google · Gemini 2.5 Pro",
+    provider: "custom",
+    protocol: "gemini",
+    base_url: "https://generativelanguage.googleapis.com/v1beta",
+    model: "gemini-2.5-pro",
+    api_key_set: true,
+    api_key_hint: "demo",
+    price_input: "9",
+    price_output: "72",
+  },
+  {
+    id: "ollama-qwen2.5-local",
+    name: "Ollama Local · Qwen2.5-14B",
+    provider: "custom",
+    protocol: "openai",
+    base_url: "http://127.0.0.1:11434/v1",
+    model: "qwen2.5:14b-instruct",
+    api_key_set: false,
+    api_key_hint: null,
+    price_input: "0",
+    price_output: "0",
+  },
+];
+
+export const DEMO_AGENT_BINDINGS: Record<AgentRole, AgentRoleSettingsView> = {
+  chat: {
+    model_id: "claude-sonnet-4",
+    escalation_model_id: null,
+    fallback_model_ids: ["openai-gpt-4o"],
+    escalation_fallback_model_ids: [],
+    limits: { max_steps: 24, timeout_seconds: 180, max_cost: "2", max_tokens: 2048 },
+    default_limits: { max_steps: 24, timeout_seconds: 180, max_cost: "2", max_tokens: 2048 },
+  },
+  finance: {
+    model_id: "gemini-2.5-pro",
+    escalation_model_id: null,
+    fallback_model_ids: ["claude-sonnet-4"],
+    escalation_fallback_model_ids: [],
+    limits: { max_steps: 10, timeout_seconds: 90, max_cost: "1", max_tokens: 2048 },
+    default_limits: { max_steps: 10, timeout_seconds: 90, max_cost: "1", max_tokens: 2048 },
+  },
+  reconcile: {
+    model_id: "ollama-qwen2.5-local",
+    escalation_model_id: "gemini-2.5-pro",
+    fallback_model_ids: [],
+    escalation_fallback_model_ids: [],
+    limits: { max_steps: 30, timeout_seconds: 600, max_cost: "2", max_tokens: 4096 },
+    default_limits: { max_steps: 30, timeout_seconds: 600, max_cost: "2", max_tokens: 4096 },
+  },
+  review: {
+    model_id: "ollama-qwen2.5-local",
+    escalation_model_id: null,
+    fallback_model_ids: [],
+    escalation_fallback_model_ids: [],
+    limits: { max_steps: 24, timeout_seconds: 5, max_cost: "0.30", max_tokens: 256 },
+    default_limits: { max_steps: 24, timeout_seconds: 5, max_cost: "0.30", max_tokens: 256 },
+  },
+  subscription: {
+    model_id: "ollama-qwen2.5-local",
+    escalation_model_id: null,
+    fallback_model_ids: [],
+    escalation_fallback_model_ids: [],
+    limits: { max_steps: 1, timeout_seconds: 30, max_cost: "0.30", max_tokens: 2048 },
+    default_limits: { max_steps: 1, timeout_seconds: 30, max_cost: "0.30", max_tokens: 2048 },
+  },
+  summary: {
+    model_id: "ollama-qwen2.5-local",
+    escalation_model_id: null,
+    fallback_model_ids: [],
+    escalation_fallback_model_ids: [],
+    limits: { max_steps: 1, timeout_seconds: 60, max_cost: "0.20", max_tokens: 2048 },
+    default_limits: { max_steps: 1, timeout_seconds: 60, max_cost: "0.20", max_tokens: 2048 },
+  },
+};
+
 

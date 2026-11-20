@@ -1,12 +1,13 @@
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 import type {
   AttributionLineageTree,
+  CategoryRecord,
   EconomicEvent,
   SpendingScope,
   SpendingSummary,
 } from "../api/client";
 
-const QUICK_FILTERS = ["", "桂林", "邻夏", "24H", "滴滴", "山东高速", "7ELEVEn", "美团"];
+const QUICK_FILTERS = ["", "美团", "滴滴", "超市", "咖啡", "高铁", "话费"];
 
 function fmt(v: string | number) {
   const n = Number(v);
@@ -15,6 +16,10 @@ function fmt(v: string | number) {
 
 export function LedgerPage(props: {
   events: EconomicEvent[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  onPageChange: (nextPage: number) => void;
   spending: SpendingSummary;
   scope: SpendingScope;
   search: string;
@@ -22,27 +27,57 @@ export function LedgerPage(props: {
   selectedId: string | null;
   onSelect: (id: string) => void;
   lineage: AttributionLineageTree | null;
+  categories: CategoryRecord[];
+  onSetEventCategory?: (eventId: string, categoryId: string) => Promise<void>;
 }) {
-  const { events, spending, scope, search, onSearchChange, selectedId, onSelect, lineage } = props;
+  const {
+    events,
+    totalCount,
+    page,
+    pageSize,
+    onPageChange,
+    spending,
+    scope,
+    search,
+    onSearchChange,
+    selectedId,
+    onSelect,
+    lineage,
+    categories,
+    onSetEventCategory,
+  } = props;
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return events.filter((e) => {
-      const isFam =
-        e.payer_party_id === "party:family" || e.beneficiary_party_id === "party:family";
-      if (scope === "personal" && isFam) return false;
-      if (scope === "household" && !isFam) return false;
-      if (q && !e.title.toLowerCase().includes(q) && !e.id.toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }, [events, scope, search]);
+  const currentCatId = lineage?.allocations?.[0]?.category_id ?? "";
+  const [selectedCat, setSelectedCat] = useState(currentCatId);
+  const [savingCat, setSavingCat] = useState(false);
+  const [catFeedback, setCatFeedback] = useState<string | null>(null);
 
+  useEffect(() => {
+    setSelectedCat(lineage?.allocations?.[0]?.category_id ?? "");
+    setCatFeedback(null);
+  }, [lineage?.event?.id, lineage?.allocations?.[0]?.category_id]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const curNet =
     scope === "personal"
       ? spending.personal_spending
       : scope === "household"
         ? spending.household_spending
         : spending.total_spending;
+
+  const handleSaveCategory = async () => {
+    if (!lineage || !selectedCat || !onSetEventCategory) return;
+    setSavingCat(true);
+    setCatFeedback(null);
+    try {
+      await onSetEventCategory(lineage.event.id, selectedCat);
+      setCatFeedback("✓ 分类已持久化（重跑求解器后自动保留）");
+    } catch (err) {
+      setCatFeedback(`✕ 保存失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setSavingCat(false);
+    }
+  };
 
   return (
     <div>
@@ -79,7 +114,7 @@ export function LedgerPage(props: {
             <input
               className="input"
               style={{ flex: "1 1 220px" }}
-              placeholder="按商户、商品、合单或事件 ID 检索..."
+              placeholder="按商户、商品、合单或事件 ID 后端检索..."
               value={search}
               onChange={(e) => onSearchChange(e.target.value)}
             />
@@ -107,34 +142,74 @@ export function LedgerPage(props: {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((ev) => {
-                  const isFam =
-                    ev.payer_party_id === "party:family" ||
-                    ev.beneficiary_party_id === "party:family";
-                  return (
-                    <tr
-                      key={ev.id}
-                      className={selectedId === ev.id ? "selected" : ""}
-                      onClick={() => onSelect(ev.id)}
-                    >
-                      <td className="mono" style={{ color: "var(--ink-muted)", whiteSpace: "nowrap" }}>
-                        {ev.occurred_at.slice(0, 16).replace("T", " ")}
-                      </td>
-                      <td style={{ fontWeight: 500 }}>{ev.title}</td>
-                      <td>
-                        <span className="tag tag-neutral" style={{ marginRight: 4 }}>
-                          {ev.kind}
-                        </span>
-                        {isFam && <span className="tag tag-family">family</span>}
-                      </td>
-                      <td className="num-col">
-                        {ev.currency} {fmt(ev.amount)}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {events.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} style={{ textAlign: "center", padding: 28, color: "var(--ink-muted)" }}>
+                      未检索到匹配的经济事件。
+                    </td>
+                  </tr>
+                ) : (
+                  events.map((ev) => {
+                    const isFam =
+                      ev.payer_party_id === "party:family" ||
+                      ev.beneficiary_party_id === "party:family";
+                    return (
+                      <tr
+                        key={ev.id}
+                        className={selectedId === ev.id ? "selected" : ""}
+                        onClick={() => onSelect(ev.id)}
+                      >
+                        <td className="mono" style={{ color: "var(--ink-muted)", whiteSpace: "nowrap" }}>
+                          {ev.occurred_at.slice(0, 16).replace("T", " ")}
+                        </td>
+                        <td style={{ fontWeight: 500 }}>{ev.title}</td>
+                        <td>
+                          <span className="tag tag-neutral" style={{ marginRight: 4 }}>
+                            {ev.kind}
+                          </span>
+                          {isFam && <span className="tag tag-family">family</span>}
+                        </td>
+                        <td className="num-col">
+                          {ev.currency} {fmt(ev.amount)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "10px 14px",
+              borderTop: "1px solid var(--border-hairline)",
+              fontSize: 12,
+              color: "var(--ink-muted)",
+            }}
+          >
+            <span className="mono">
+              共 {totalCount} 笔匹配 · 第 {page + 1} / {totalPages} 页
+            </span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button
+                className="btn"
+                disabled={page <= 0}
+                onClick={() => onPageChange(Math.max(0, page - 1))}
+              >
+                ← 上一页
+              </button>
+              <button
+                className="btn"
+                disabled={page + 1 >= totalPages}
+                onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))}
+              >
+                下一页 →
+              </button>
+            </div>
           </div>
         </div>
 
@@ -158,6 +233,42 @@ export function LedgerPage(props: {
                   {lineage.event.currency} {fmt(lineage.event.amount)} · kind={lineage.event.kind} ·
                   payer={lineage.event.payer_party_id ?? "—"}
                 </div>
+
+                {categories.length > 0 && onSetEventCategory && (
+                  <div
+                    className="lineage-evidence"
+                    style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}
+                  >
+                    <div className="metric-label">分类归属（Allocation）</div>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <select
+                        className="input"
+                        style={{ flex: 1 }}
+                        value={selectedCat}
+                        onChange={(e) => setSelectedCat(e.target.value)}
+                      >
+                        <option value="">选择分类...</option>
+                        {categories.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            [{c.kind}] {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="btn btn-primary"
+                        disabled={savingCat || !selectedCat || selectedCat === currentCatId}
+                        onClick={() => void handleSaveCategory()}
+                      >
+                        {savingCat ? "保存中..." : "保存分类"}
+                      </button>
+                    </div>
+                    {catFeedback && (
+                      <div style={{ fontSize: 11.5, color: "var(--ink-secondary)" }}>
+                        {catFeedback}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {lineage.legs.map((item) => (
                   <div key={item.leg.id} className="lineage-node">
