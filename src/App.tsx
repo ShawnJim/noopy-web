@@ -8,6 +8,7 @@ import {
   type ReviewItem,
   type SpendingScope,
   type SpendingSummary,
+  type ThemeVariant,
 } from "./api/client";
 import {
   computeDemoSpending,
@@ -17,27 +18,42 @@ import {
   DEMO_LINEAGES,
   DEMO_REVIEWS,
 } from "./data/demoOntology";
+import { AgentModelSettingsPage } from "./pages/AgentModelSettingsPage";
 import { AssistantPage } from "./pages/AssistantPage";
+import { ImportPage } from "./pages/ImportPage";
 import { InboxPage } from "./pages/InboxPage";
 import { LedgerPage } from "./pages/LedgerPage";
 import { OntologyPage } from "./pages/OntologyPage";
-import { PlanSettingsPage } from "./pages/PlanSettingsPage";
+import { ReportsPage } from "./pages/ReportsPage";
+import { SubscriptionsPage } from "./pages/SubscriptionsPage";
 import "./styles/app.css";
 
-type Space = "assistant" | "ledger" | "inbox" | "ontology" | "settings";
+type NavKey =
+  | "assistant"
+  | "ledger"
+  | "reports"
+  | "inbox"
+  | "import"
+  | "subscriptions"
+  | "ontology"
+  | "models";
 
-const SPACE_TITLES: Record<Space, string> = {
+const NAV_TITLES: Record<NavKey, string> = {
   assistant: "AI 财务助手",
   ledger: "账本与归因血缘",
+  reports: "多维统计报表",
   inbox: "证据收件箱",
-  ontology: "导入与本体中心",
-  settings: "规划与系统设置",
+  import: "账单导入与解析",
+  subscriptions: "周期订阅与识别",
+  ontology: "本体中心（账户 · 别名 · 规则）",
+  models: "Agent 与本地模型配置",
 };
 
 const client = new NoopyClient();
 
 export function App() {
-  const [space, setSpace] = useState<Space>("ledger");
+  const [nav, setNav] = useState<NavKey>("ledger");
+  const [theme, setTheme] = useState<ThemeVariant>("foundry");
   const [scope, setScope] = useState<SpendingScope>("all");
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const [search, setSearch] = useState("");
@@ -130,7 +146,7 @@ export function App() {
 
   const handleRunSolver = async () => {
     if (mode === "demo") {
-      return "Demo 模式：连接本地 noopy-core (/v2/solver/run) 后将触发真实 5 阶段纯 Rust 求解与 PostgreSQL 落库。";
+      return "Demo 模式：连接本机 noopy-core (/v2/solver/run) 后将执行纯 Rust 5 阶段求解器并落库 PostgreSQL。";
     }
     const res = await client.runSolver([]);
     await loadAll(scope);
@@ -138,7 +154,7 @@ export function App() {
   };
 
   return (
-    <div className="frame">
+    <div className="frame" data-theme={theme}>
       <aside className="sidebar">
         <div className="sidebar-brand">
           <span className="brand-title">Noopy Ontology</span>
@@ -146,43 +162,65 @@ export function App() {
         </div>
 
         <nav className="nav-group" aria-label="主导航">
-          <div className="nav-section-label">Workspace</div>
+          <div className="nav-section-label">分析与助手</div>
           <button
-            className={`nav-item ${space === "assistant" ? "active" : ""}`}
-            onClick={() => setSpace("assistant")}
+            className={`nav-item ${nav === "assistant" ? "active" : ""}`}
+            onClick={() => setNav("assistant")}
           >
             <span>AI 助手</span>
           </button>
           <button
-            className={`nav-item ${space === "ledger" ? "active" : ""}`}
-            onClick={() => setSpace("ledger")}
+            className={`nav-item ${nav === "ledger" ? "active" : ""}`}
+            onClick={() => setNav("ledger")}
           >
             <span>账本与血缘</span>
             <span className="nav-count">{spending.active_event_count}</span>
           </button>
           <button
-            className={`nav-item ${space === "inbox" ? "active" : ""}`}
-            onClick={() => setSpace("inbox")}
+            className={`nav-item ${nav === "reports" ? "active" : ""}`}
+            onClick={() => setNav("reports")}
+          >
+            <span>统计报表</span>
+          </button>
+          <button
+            className={`nav-item ${nav === "inbox" ? "active" : ""}`}
+            onClick={() => setNav("inbox")}
           >
             <span>证据收件箱</span>
             <span className="nav-count">{reviews.length}</span>
           </button>
 
-          <div className="nav-section-label" style={{ marginTop: 10 }}>
-            Ontology & System
+          <div className="nav-section-label" style={{ marginTop: 8 }}>
+            数据与运营
           </div>
           <button
-            className={`nav-item ${space === "ontology" ? "active" : ""}`}
-            onClick={() => setSpace("ontology")}
+            className={`nav-item ${nav === "import" ? "active" : ""}`}
+            onClick={() => setNav("import")}
           >
-            <span>导入与本体</span>
-            <span className="nav-count">{aliases.length}</span>
+            <span>账单导入</span>
           </button>
           <button
-            className={`nav-item ${space === "settings" ? "active" : ""}`}
-            onClick={() => setSpace("settings")}
+            className={`nav-item ${nav === "subscriptions" ? "active" : ""}`}
+            onClick={() => setNav("subscriptions")}
           >
-            <span>规划与设置</span>
+            <span>周期订阅</span>
+          </button>
+          <button
+            className={`nav-item ${nav === "ontology" ? "active" : ""}`}
+            onClick={() => setNav("ontology")}
+          >
+            <span>本体与账户</span>
+            <span className="nav-count">{aliases.length}</span>
+          </button>
+
+          <div className="nav-section-label" style={{ marginTop: 8 }}>
+            系统与模型
+          </div>
+          <button
+            className={`nav-item ${nav === "models" ? "active" : ""}`}
+            onClick={() => setNav("models")}
+          >
+            <span>Agent 与本地模型</span>
           </button>
         </nav>
 
@@ -197,7 +235,7 @@ export function App() {
 
       <div className="workspace">
         <header className="topbar">
-          <h1 className="topbar-title">{SPACE_TITLES[space]}</h1>
+          <h1 className="topbar-title">{NAV_TITLES[nav]}</h1>
           <div className="topbar-controls">
             <div className="seg" role="group" aria-label="亲情卡口径">
               {(
@@ -231,11 +269,23 @@ export function App() {
                 仅已证实
               </button>
             </div>
+
+            <select
+              className="input"
+              aria-label="界面风格切换"
+              value={theme}
+              onChange={(e) => setTheme(e.target.value as ThemeVariant)}
+            >
+              <option value="foundry">风格 A · Foundry 精密台</option>
+              <option value="editorial">风格 B · Editorial 手账风</option>
+              <option value="obsidian">风格 C · Obsidian 暗色台</option>
+              <option value="mercury">风格 D · Mercury 极简风</option>
+            </select>
           </div>
         </header>
 
         <main className="content">
-          {space === "assistant" && (
+          {nav === "assistant" && (
             <AssistantPage
               spending={spending}
               balances={balances}
@@ -243,11 +293,11 @@ export function App() {
               events={events}
               onInspectEvent={(id) => {
                 setSelectedId(id);
-                setSpace("ledger");
+                setNav("ledger");
               }}
             />
           )}
-          {space === "ledger" && (
+          {nav === "ledger" && (
             <LedgerPage
               events={events}
               spending={spending}
@@ -259,13 +309,24 @@ export function App() {
               lineage={lineage}
             />
           )}
-          {space === "inbox" && (
+          {nav === "reports" && <ReportsPage scope={scope} spending={spending} />}
+          {nav === "inbox" && (
             <InboxPage
               reviews={reviews}
               onResolve={(idx) => setReviews((prev) => prev.filter((_, i) => i !== idx))}
             />
           )}
-          {space === "ontology" && (
+          {nav === "import" && (
+            <ImportPage
+              accounts={balances}
+              onUploadFile={async (f, aid) => {
+                await client.uploadFile(f, aid);
+              }}
+              onRunSolver={handleRunSolver}
+            />
+          )}
+          {nav === "subscriptions" && <SubscriptionsPage />}
+          {nav === "ontology" && (
             <OntologyPage
               balances={balances}
               aliases={aliases}
@@ -273,7 +334,7 @@ export function App() {
               onRunSolver={handleRunSolver}
             />
           )}
-          {space === "settings" && <PlanSettingsPage mode={mode} />}
+          {nav === "models" && <AgentModelSettingsPage client={client} />}
         </main>
       </div>
     </div>

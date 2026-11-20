@@ -1,9 +1,11 @@
 /**
- * Noopy v2 全量强类型 API 客户端（同时覆盖 /v2/ontology/* 与 /v1/* 业务端点）。
+ * Noopy v2 全量强类型 API 客户端（完整覆盖 /v2/ontology/* 与 /v1/* 全部操作面：
+ * 文件上传导入、统计报表、周期订阅与自动识别、多模型注册表与本地 Ollama/vLLM 配置、6 角色 Agent 绑定）。
  */
 
 export type SpendingScope = "personal" | "household" | "all";
 export type VerificationState = "inferred" | "verified";
+export type ThemeVariant = "foundry" | "editorial" | "obsidian" | "mercury";
 
 export interface EconomicEvent {
   id: string;
@@ -107,14 +109,41 @@ export interface ReviewItem {
   evidence: Record<string, unknown>;
 }
 
-export interface BudgetProgress {
+export interface SourceFileRecord {
   id: string;
-  name: string;
-  period: string;
-  limit: string;
-  spent: string;
-  ratio: number;
+  filename: string;
+  parser_id: string;
+  parse_status: "received" | "parsing" | "needs_password" | "parsed" | "unknown_format" | "failed";
+  record_count: number;
+  range?: string;
+  error?: string | null;
 }
+
+export interface MonthlyReportPoint {
+  month: string;
+  personal: string;
+  household: string;
+  income: string;
+  count: number;
+}
+
+export interface MerchantRankItem {
+  name: string;
+  amount: string;
+  count: number;
+}
+
+export interface AccountFlowItem {
+  account_id: string;
+  name: string;
+  outflow: string;
+  inflow: string;
+  verified: number;
+  inferred: number;
+}
+
+export type SubscriptionCycle = "week" | "month" | "quarter" | "year";
+export type SubscriptionStatus = "active" | "paused" | "cancelled";
 
 export interface SubscriptionItem {
   id: string;
@@ -122,9 +151,42 @@ export interface SubscriptionItem {
   merchant?: string | null;
   amount: string;
   currency: string;
-  cycle: string;
+  cycle: SubscriptionCycle;
   next_charge_on: string;
-  status: string;
+  status: SubscriptionStatus;
+  flag?: string | null;
+}
+
+export interface SubscriptionCandidate {
+  title: string;
+  amount: string;
+  months: number;
+  charges: number;
+  last_on: string;
+}
+
+export interface ModelDefinition {
+  id: string;
+  name: string;
+  provider: "deepseek" | "dashscope" | "zhipu" | "custom";
+  base_url?: string;
+  model: string;
+  api_key?: string | null;
+  price_input?: string;
+  price_output?: string;
+}
+
+export type AgentRole = "chat" | "finance" | "review" | "reconcile" | "subscription" | "summary";
+
+export interface AgentRoleBinding {
+  role: AgentRole;
+  label: string;
+  hint: string;
+  model_id: string | null;
+  escalation_model_id: string | null;
+  max_steps: number;
+  max_seconds: number;
+  max_cost: string;
 }
 
 export interface AttributionRuleItem {
@@ -135,6 +197,15 @@ export interface AttributionRuleItem {
   hits: number;
   enabled: boolean;
   description: string;
+}
+
+export interface BudgetProgress {
+  id: string;
+  name: string;
+  period: string;
+  limit: string;
+  spent: string;
+  ratio: number;
 }
 
 export class NoopyClient {
@@ -161,7 +232,10 @@ export class NoopyClient {
   }
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = {};
+    if (!(init?.body instanceof FormData)) {
+      headers["Content-Type"] = "application/json";
+    }
     if (this.token) headers.Authorization = `Bearer ${this.token}`;
     const res = await fetch(`${this.baseUrl}${path}`, {
       ...init,
@@ -204,6 +278,10 @@ export class NoopyClient {
     return this.request<{ total: number; items: ReviewItem[] }>("/v2/ontology/review");
   }
 
+  getSqlSnapshot() {
+    return this.request<{ tables: Record<string, Record<string, unknown>[]> }>("/v2/ontology/snapshot");
+  }
+
   runSolver(observations: Record<string, unknown>[] = []) {
     return this.request<{
       metrics: Record<string, number>;
@@ -215,20 +293,65 @@ export class NoopyClient {
     });
   }
 
-  // --- v1 Operational APIs (Budgets / Subscriptions / Model Settings / Agent Runs) ---
-  getBudgetProgress() {
-    return this.request<{ items: BudgetProgress[] }>("/v1/budgets/progress");
+  // --- v1 File Import APIs ---
+  listFiles() {
+    return this.request<{ items: SourceFileRecord[] }>("/v1/files");
   }
 
+  uploadFile(file: File, accountId?: string) {
+    const form = new FormData();
+    form.append("file", file);
+    if (accountId) form.append("account_id", accountId);
+    return this.request<SourceFileRecord>("/v1/files", {
+      method: "POST",
+      headers: { "Idempotency-Key": `upload_${file.name}_${file.size}_${Date.now()}` },
+      body: form,
+    });
+  }
+
+  unlockFilePassword(fileId: string, password: string) {
+    return this.request<SourceFileRecord>(`/v1/files/${encodeURIComponent(fileId)}:password`, {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    });
+  }
+
+  // --- v1 Subscriptions & Proposals ---
   getSubscriptions() {
     return this.request<{ items: SubscriptionItem[] }>("/v1/subscriptions");
   }
 
+  detectSubscriptions() {
+    return this.request<{ items: SubscriptionCandidate[] }>("/v1/subscriptions:detect");
+  }
+
+  createProposal(intent: string, ops: Record<string, unknown>[]) {
+    return this.request<{ id: string; status: string }>("/v1/proposals", {
+      method: "POST",
+      headers: { "Idempotency-Key": `prop_${Date.now()}` },
+      body: JSON.stringify({ intent, ops, base_versions: {} }),
+    });
+  }
+
+  // --- v1 Model & Agent Settings ---
   getModelSettings() {
     return this.request<Record<string, unknown>>("/v1/model-settings");
   }
 
-  getAgentRuns() {
-    return this.request<{ items: Record<string, unknown>[] }>("/v1/agent-runs");
+  saveModelSettings(payload: Record<string, unknown>) {
+    return this.request<Record<string, unknown>>("/v1/model-settings", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  testModelSettings(payload: Record<string, unknown>) {
+    return this.request<{ ok?: boolean; latency_ms?: number; model?: string; reply?: string }>(
+      "/v1/model-settings:test",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
   }
 }
