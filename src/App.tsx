@@ -40,17 +40,24 @@ export function App() {
     DEMO_LINEAGES[DEMO_EVENTS[0].id] ?? null,
   );
 
-  // 尝试连接 /v2/ontology/* 后端；未启动时平滑回退到脱敏演示模式
+  // 尝试连接 /v2/ontology/* 后端（自动使用开发账号登录拿会话令牌）；未启动时回退到脱敏演示模式
   useEffect(() => {
     let active = true;
     (async () => {
       try {
+        const cached = window.localStorage.getItem("noopy_v2_token");
+        if (cached) {
+          client.setToken(cached);
+        } else {
+          const tok = await client.login("owner@noopy.local", "noopy-dev-password");
+          window.localStorage.setItem("noopy_v2_token", tok);
+        }
         const [sp, bal, evs, rev, als] = await Promise.all([
           client.getSpendingSummary(scope),
           client.getBalances(),
-          client.queryObjects<EconomicEvent>({ object_type: "economic_event", scope, limit: 100 }),
+          client.queryObjects<EconomicEvent>({ object_type: "economic_event", scope, limit: 200 }),
           client.getReviewInbox(),
-          client.queryObjects<IdentityAlias>({ object_type: "identity_alias", limit: 100 }),
+          client.queryObjects<IdentityAlias>({ object_type: "identity_alias", limit: 200 }),
         ]);
         if (!active) return;
         setMode("live");
@@ -59,8 +66,40 @@ export function App() {
         setEvents(evs.items);
         setReviews(rev.items);
         setAliases(als.items);
-        if (evs.items.length > 0) setSelectedId(evs.items[0].id);
+        if (evs.items.length > 0 && !evs.items.some((e) => e.id === selectedId)) {
+          setSelectedId(evs.items[0].id);
+        }
       } catch {
+        // 若旧 token 失效，清掉后重试一次登录
+        if (window.localStorage.getItem("noopy_v2_token")) {
+          window.localStorage.removeItem("noopy_v2_token");
+          try {
+            const tok = await client.login("owner@noopy.local", "noopy-dev-password");
+            window.localStorage.setItem("noopy_v2_token", tok);
+            const [sp, bal, evs, rev, als] = await Promise.all([
+              client.getSpendingSummary(scope),
+              client.getBalances(),
+              client.queryObjects<EconomicEvent>({
+                object_type: "economic_event",
+                scope,
+                limit: 200,
+              }),
+              client.getReviewInbox(),
+              client.queryObjects<IdentityAlias>({ object_type: "identity_alias", limit: 200 }),
+            ]);
+            if (!active) return;
+            setMode("live");
+            setSpending(sp);
+            setBalances(bal.items);
+            setEvents(evs.items);
+            setReviews(rev.items);
+            setAliases(als.items);
+            if (evs.items.length > 0) setSelectedId(evs.items[0].id);
+            return;
+          } catch {
+            /* fall through to demo */
+          }
+        }
         if (!active) return;
         setMode("demo");
         setSpending(computeDemoSpending(scope));

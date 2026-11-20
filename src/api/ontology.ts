@@ -109,10 +109,27 @@ export interface ReviewItem {
 }
 
 export class OntologyClient {
+  private token?: string;
+
   constructor(
     private readonly baseUrl = "",
-    private readonly token?: string,
-  ) {}
+    token?: string,
+  ) {
+    this.token = token;
+  }
+
+  setToken(token?: string) {
+    this.token = token;
+  }
+
+  async login(email: string, password: string): Promise<string> {
+    const res = await this.request<{ token: string }>("/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    this.token = res.token;
+    return res.token;
+  }
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     const headers: Record<string, string> = {
